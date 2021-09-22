@@ -26,6 +26,7 @@ end
 
 -- Safe packages/functions below
 ([[
+print timestamp
 RESULT_LEN RESULT_OFF
 _VERSION assert error	ipairs   next pairs
 pcall	select tonumber tostring type unpack xpcall
@@ -36,7 +37,7 @@ math.cos   math.cosh math.deg   math.exp  math.fmod  math.floor
 math.frexp math.huge math.ldexp math.log  math.log10 math.max
 math.min   math.modf math.pi	math.pow  math.rad   math.random
 math.sin   math.sinh math.sqrt  math.tan  math.tanh
-os.clock os.difftime os.time
+os.clock os.difftime os.time os.date
 string.byte string.char  string.find  string.format string.gmatch
 string.gsub string.len   string.lower string.match  string.reverse
 string.sub  string.upper
@@ -71,25 +72,36 @@ local function is_byte_array(t)
 	for _ in pairs(t) do
 		i = i + 1
 		if t[i] == nil or not (t[i] >= 0 and t[i] <= 255) then
+			print('--', i, t[i], type(t[i]))
 			return false
 		end
 	end
 	return true
 end
 
-function run_sandboxed(untrusted_code)
+function run_sandboxed(untrusted_code, period_counter)
+	BASE_ENV['PERIOD_COUNTER'] = period_counter
 	local untrusted_function, message = load(untrusted_code, nil, 't', BASE_ENV)
 	if not untrusted_function then
 		return false, message
 	end
-	success, result = pcall(untrusted_function)
-	if not is_byte_array(result) then
-		return false, 'Returned value is not a byte array'
+	success, result, delay = pcall(untrusted_function)
+	if success then
+		delay = delay or 1000
+		if delay < 50 then
+			return false, 'Delay should be less then 50', nil
+		end
+		-- if delay > 10000 then
+		-- 	return false, 'Delay shouldn\'t be greater then 10000', nil
+		-- end
+		if not is_byte_array(result) then
+			return false, 'Returned value is not a byte array', nil
+		end
+		if #result ~= RESULT_LEN then
+			return false, string.format('Result length should be %d bytes, actual is %d', RESULT_LEN, #result), nil
+		end
 	end
-	if #result ~= RESULT_LEN then
-		return false, string.format('Result length should be %d bytes, actual is %d', RESULT_LEN, #result)
-	end
-	return success, result
+	return success, result, delay
 end
 
 print('Sandbox loaded')

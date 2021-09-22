@@ -19,9 +19,9 @@ def write_pic(port, pic):
     data = b''
     for px in pic:
         data += struct.pack('BBB', *px)
-    print('write started')
+#    print('write started')
     port.write(data)
-    print('write finished')
+#    print('write finished')
 
 
 def main(port_name):
@@ -29,9 +29,9 @@ def main(port_name):
         while True:
             pic = []
             for i in range(300):
-                pic.append((random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
+                pic.append((random.randint(0, 2), random.randint(0, 2), random.randint(0, 2)))
             write_pic(port, pic)
-            time.sleep(1)
+            time.sleep(0.1)
     return 0
 
 
