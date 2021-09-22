@@ -1,0 +1,55 @@
+body {
+    font-family: Monospace;
+    font-size: 11px;
+    background-color: lightgray;
+}
+
+input {
+    font-family: Monospace;
+    font-size: 11px;
+}
+
+select {
+    font-family: Monospace;
+    font-size: 11px;
+}
+
+textarea {
+    font-family: Monospace;
+    font-size: 11px;
+}
+
+#codeArea {
+    width: 600pt;
+    height: 400pt;
+}
+
+.dot {
+    height: 16px;
+    width: 16px;
+    background-color: black;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+/*
+@media (prefers-color-scheme: dark) {
+    html, body, div, ul, li, table, tr, td,nav, h1, h2, h3, h4, h5, h6, p,
+    header, section, code, button, font, dt, dd, dl, article, input, select, textarea, span {
+        color: lightgray;
+        border-color: darkgrey;
+        background: rgb(35,35,35);
+        background-color: rgb(35,35,35);
+    }
+
+    code, pre {
+        color: rgb(80, 200, 70);
+        background-color: rgb(28,28,28);
+    }
+
+    a {
+        color: rgb(30,158,191);
+        background: rgb(35,35,35);
+    }
+}
+*/

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<title>LED strip programming</title>
+		<link rel="stylesheet" href="styles.css">
+	</head>
+
+	<body>
+		<!-- <script src="logic.js"></script> -->
+		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
+		<script>
+			function runCode() {
+				let ws = new WebSocket('ws://server.local:8000');
+				ws.onopen = function (event) {
+					ws.send(codeArea.getValue());
+					ws.send('\0');
+				};
+			}
+		</script>
+		<table>
+			<tr>
+				<td id="codeArea">-- random flashing
+result = {}
+for i = 1, 300, 1 do
+	table.insert(result, math.random(0x00, 0x0f)) -- red
+	table.insert(result, math.random(0x00, 0x0f)) -- green
+	table.insert(result, math.random(0x00, 0x0f)) -- blue
+end
+
+return result, 200
+</td>
+				<td style="white-space: pre">
+<button type="button" onclick="runCode()"> > Run </button>
+
+Examples:
+<hr>-- random flashing
+result = {}
+for i = 1, 300, 1 do
+	table.insert(result, math.random(0x00, 0x0f)) -- red
+	table.insert(result, math.random(0x00, 0x0f)) -- green
+	table.insert(result, math.random(0x00, 0x0f)) -- blue
+end
+
+return result, 200
+<hr>-- running colors
+local result = {}
+local rfocus = PERIOD_COUNTER % 300
+local gfocus = (PERIOD_COUNTER + 100) % 300
+local bfocus = (PERIOD_COUNTER + 200) % 300
+for i = 1, 300, 1 do
+	table.insert(result, math.floor(255 / (math.abs(i - rfocus) + 1))) -- red
+	table.insert(result, math.floor(255 / (math.abs(i - gfocus) + 1))) -- green
+	table.insert(result, math.floor(255 / (math.abs(i - bfocus) + 1))) -- blue
+end
+
+return result, 50
+</td>
+			</tr>
+		</table>
+		<script>
+			ace.config.set('basePath', 'https://pagecdn.io/lib/ace/1.4.12');
+			let codeArea = ace.edit('codeArea');
+			// codeArea.setTheme("ace/theme/monokai");
+			codeArea.session.setMode("ace/mode/lua");
+		</script>
+
+	</body>
+</html>
