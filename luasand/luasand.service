@@ -1,0 +1,13 @@
+[Unit]
+Description=luasand
+After=network-online.target
+
+[Service]
+ExecStart=/mnt/hdd2t/www/remoteled/luasand/build/luasand
+WorkingDirectory=/mnt/hdd2t/www/remoteled/luasand/build/
+User=hypafrag
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

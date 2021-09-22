@@ -76,3 +76,7 @@ fabric.properties
 .venv
 
 .DS_Store
+
+.vscode
+
+build

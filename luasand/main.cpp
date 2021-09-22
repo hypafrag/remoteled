@@ -29,13 +29,29 @@ using namespace std;
 
 struct ClientData {
 	ClientData()
-		: luaCodeBufferSize(0)
+		: wsi(nullptr)
+		, luaCodeBufferSize(0)
 	{
 
 	}
 
+	lws *wsi;
+	const lws_context *lwsContext;
+	const lws_protocols *lwsProtocol;
 	char luaCodeBuffer[LUA_CODE_LEN + 1];
 	size_t luaCodeBufferSize;
+	vector<string> output;
+	mutex outputMutex;
+
+	void print(const std::string &str) {
+		static string prePadding(LWS_SEND_BUFFER_PRE_PADDING, '\0');
+		static string postPadding(LWS_SEND_BUFFER_POST_PADDING, '\0');
+		outputMutex.lock();
+		output.push_back(prePadding + str + postPadding);
+		outputMutex.unlock();
+		lws_callback_on_writable_all_protocol(lwsContext, lwsProtocol);
+		cout << wsi << ' ' << str << endl;
+	}
 };
 
 unordered_map<lws*, ClientData> g_clientsData;
@@ -53,7 +69,7 @@ static int lua_timestamp(lua_State *L) {
 }
 
 // TODO: memory allocation limit
-bool runLuaSandboxed(const char *code, int periodCounter, uint8_t result[LED_NUM], int *delay) {
+bool runLuaSandboxed(const char *code, int periodCounter, uint8_t result[LED_NUM], int *delay, ClientData *client = nullptr) {
 	lua_getglobal(L, "run_sandboxed");
 	lua_pushstring(L, code);
 	lua_pushinteger(L, periodCounter);
@@ -71,38 +87,39 @@ bool runLuaSandboxed(const char *code, int periodCounter, uint8_t result[LED_NUM
 		} else {
 			success = false;
 		}
-		// auto message = "Done";
-		// lws_write(wsi, (unsigned char*)message, strlen(message), LWS_WRITE_TEXT);
 	} else {
 		auto error = lua_tostring(L, -2);
-		fprintf(stderr, "result is: %s\n", error);
-		// lws_write(wsi, (unsigned char*)error, strlen(error), LWS_WRITE_TEXT);
+		if (client != nullptr) {
+			client->print(error);
+		} else {
+			cout << error << endl;
+		}
 	}
 	lua_pop(L, 3);
 	return success;
 }
 
-static int wsDataReceived(lws *wsi, ClientData &clientData, const char *chunk, size_t chunkLen, bool terminated) {
-	if (clientData.luaCodeBufferSize + chunkLen > LUA_CODE_LEN) {
+static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen, bool terminated) {
+	if (client.luaCodeBufferSize + chunkLen > LUA_CODE_LEN) {
 		return 1;
 	}
-	size_t luaCodeOrigSize = clientData.luaCodeBufferSize;
-	clientData.luaCodeBufferSize += chunkLen;
-	memcpy(clientData.luaCodeBuffer + luaCodeOrigSize, chunk, chunkLen);
+	size_t luaCodeOrigSize = client.luaCodeBufferSize;
+	client.luaCodeBufferSize += chunkLen;
+	memcpy(client.luaCodeBuffer + luaCodeOrigSize, chunk, chunkLen);
 	if (terminated) {
-		clientData.luaCodeBuffer[clientData.luaCodeBufferSize] = '\0';
+		client.luaCodeBuffer[client.luaCodeBufferSize] = '\0';
 		uint8_t result[LED_NUM];
 		int delay;
 		gLuaMutex.lock();
-		if (runLuaSandboxed(clientData.luaCodeBuffer, 0, result, &delay)) {
+		if (runLuaSandboxed(client.luaCodeBuffer, 0, result, &delay, &client)) {
 			write(gSerialPort, result, LED_NUM);
-			memcpy(gLuaCode, clientData.luaCodeBuffer, clientData.luaCodeBufferSize + 1);
+			memcpy(gLuaCode, client.luaCodeBuffer, client.luaCodeBufferSize + 1);
 			gPeriodicReset = delay;
+			client.print("Accepted");
 		}
 		gLuaMutex.unlock();
-		clientData.luaCodeBufferSize = 0;
+		client.luaCodeBufferSize = 0;
 	}
-
 	return 0;
 }
 
@@ -119,7 +136,9 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 		}
 
 		case LWS_CALLBACK_ESTABLISHED: {
-			g_clientsData[wsi];
+			g_clientsData[wsi].wsi = wsi;
+			g_clientsData[wsi].lwsContext = lws_get_context(wsi);
+			g_clientsData[wsi].lwsProtocol = lws_get_protocol(wsi);
 			break;
 		}
 
@@ -137,13 +156,30 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 			size_t offset = 0;
 			for (size_t i = 0; i < len; i++) {
 				if (data[i] == '\0' || data[i] == '`') { // TODO: remove `
-					wsDataReceived(wsi, iClientData->second, data + offset, i - offset, true);
+					wsDataReceived(iClientData->second, data + offset, i - offset, true);
 					offset = i + 1;
 				}
 			}
 			if (offset != len) {
-				wsDataReceived(wsi, iClientData->second, data + offset, len - offset, false);
+				wsDataReceived(iClientData->second, data + offset, len - offset, false);
 			}
+			break;
+		}
+
+		case LWS_CALLBACK_SERVER_WRITEABLE: {
+			auto iClientData = g_clientsData.find(wsi);
+			if (iClientData == g_clientsData.end()) {
+				break;
+			}
+			auto &clientData = iClientData->second;
+			clientData.outputMutex.lock();
+			for (auto &i : clientData.output) {
+				lws_write(wsi, (unsigned char *)i.c_str() + LWS_SEND_BUFFER_PRE_PADDING,
+					i.length() - LWS_SEND_BUFFER_PRE_PADDING - LWS_SEND_BUFFER_POST_PADDING,
+					LWS_WRITE_TEXT);
+			}
+			clientData.output.clear();
+			clientData.outputMutex.unlock();
 			break;
 		}
 

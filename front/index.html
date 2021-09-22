@@ -8,16 +8,73 @@
 	</head>
 
 	<body>
-		<!-- <script src="logic.js"></script> -->
 		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
 		<script>
-			function runCode() {
-				let ws = new WebSocket('ws://server.local:8000');
+			function startWebsocket() {
+				let ws = new WebSocket('wss://coons.club/ledprg/ws');
+				ws.onmessage = function(message) {
+					console.log(message.data);
+				}
 				ws.onopen = function (event) {
+					var connectionIndicator = document.getElementById('connectionIndicator');
+					connectionIndicator.style.backgroundColor = "red";
+				};
+				ws.onclose = function () {
+					var connectionIndicator = document.getElementById('connectionIndicator');
+					connectionIndicator.style.backgroundColor = "gray";
+					setTimeout(function () {
+						startWebsocket()
+					}, 3000);
+				};
+
+				// ws.on
+				window.runCode = function() {
 					ws.send(codeArea.getValue());
 					ws.send('\0');
-				};
+				}	
 			}
+			startWebsocket()
+
+			function log_timestamp() {
+				var d = new Date();
+				return '' +
+					d.getDate().toString().padStart(2, '0') + '-' +
+					d.getMonth().toString().padStart(2, '0') + '-' +
+					d.getFullYear().toString().substr(2, 2) + ' ' +
+					d.getHours().toString().padStart(2, '0') + ':' +
+					d.getMinutes().toString().padStart(2, '0') + ':' +
+					d.getSeconds().toString().padStart(2, '0') + '.' +
+					d.getMilliseconds().toString().padStart(3, '0');
+			}
+			document.addEventListener('DOMContentLoaded', function() {
+				var system_console_log = console.log;
+				var system_console_warn = console.error;
+				var system_console_error = console.error;
+				var logger = document.getElementById('log');
+				// try {
+				// 	logger.value = localStorage.getItem('pak_control_log');
+				// } catch (e) {
+
+				// }
+				console.log = function (message) {
+					logger.value += 'I ' + log_timestamp() + ' ';
+					logger.value += message + '\n';
+					logger.scrollTop = logger.scrollHeight;
+					system_console_log(message);
+				};
+				console.warn = function (message) {
+					logger.value += 'W ' + log_timestamp() + ' ';
+					logger.value += message + '\n';
+					logger.scrollTop = logger.scrollHeight;
+					system_console_warn(message);
+				};
+				console.error = function (message) {
+					logger.value += 'E ' + log_timestamp() + ' ';
+					logger.value += message + '\n';
+					logger.scrollTop = logger.scrollHeight;
+					system_console_error(message);
+				};
+			});
 		</script>
 		<table>
 			<tr>
@@ -32,7 +89,7 @@ end
 return result, 200
 </td>
 				<td style="white-space: pre">
-<button type="button" onclick="runCode()"> > Run </button>
+<span id="connectionIndicator" class="dot"></span> <button type="button" onclick="runCode()"> > Run </button>
 
 Examples:
 <hr>-- random flashing
@@ -56,15 +113,27 @@ for i = 1, 300, 1 do
 end
 
 return result, 50
+<hr>-- running colors
+local result = {}
+local rfocus = PERIOD_COUNTER % 300
+local gfocus = (PERIOD_COUNTER + 100) % 300
+local bfocus = (PERIOD_COUNTER + 200) % 300
+for i = 1, 300, 1 do
+	table.insert(result, math.floor(255 / (math.abs(i - rfocus) + 1))) -- red
+	table.insert(result, math.floor(255 / (math.abs(i - gfocus) + 1))) -- green
+	table.insert(result, math.floor(255 / (math.abs(i - bfocus) + 1))) -- blue
+end
+
+return result, 50
 </td>
 			</tr>
 		</table>
+		<textarea id="log" rows="10" cols="100" readonly></textarea>
 		<script>
 			ace.config.set('basePath', 'https://pagecdn.io/lib/ace/1.4.12');
 			let codeArea = ace.edit('codeArea');
 			// codeArea.setTheme("ace/theme/monokai");
 			codeArea.session.setMode("ace/mode/lua");
 		</script>
-
 	</body>
 </html>
