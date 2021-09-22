@@ -8,6 +8,7 @@ extern "C" {
 #include <iostream>
 #include <array>
 #include <vector>
+#include <queue>
 #include <string>
 #include <memory>
 #include <unordered_map>
@@ -22,7 +23,7 @@ extern "C" {
 
 using namespace std;
 
-#define LUA_CODE_LEN (1024 * 1024 * 4)
+#define LUA_CODE_LEN (1024 * 1024 * 1) // 1 Mb
 #define WS_RX_BUFFER_BYTES (LUA_CODE_LEN + 1)
 #define PIX_NUM 300
 #define LED_NUM (300 * 3)
@@ -31,6 +32,7 @@ struct ClientData {
 	ClientData()
 		: wsi(nullptr)
 		, luaCodeBufferSize(0)
+		, outputPos(0)
 	{
 
 	}
@@ -40,14 +42,24 @@ struct ClientData {
 	const lws_protocols *lwsProtocol;
 	char luaCodeBuffer[LUA_CODE_LEN + 1];
 	size_t luaCodeBufferSize;
-	vector<string> output;
+	struct {
+		unsigned char *string;
+		size_t length;
+	} output[20];
+	size_t outputPos;
 	mutex outputMutex;
 
-	void print(const std::string &str) {
-		static string prePadding(LWS_SEND_BUFFER_PRE_PADDING, '\0');
-		static string postPadding(LWS_SEND_BUFFER_POST_PADDING, '\0');
+	void print(const char *str) {
+		if (outputPos >= sizeof(output)) {
+			return;
+		}
+		output[outputPos].length = strlen(str);
 		outputMutex.lock();
-		output.push_back(prePadding + str + postPadding);
+		output[outputPos].string = (unsigned char*)malloc(LWS_SEND_BUFFER_PRE_PADDING +
+			output[outputPos].length + 1 + LWS_SEND_BUFFER_POST_PADDING);
+		memcpy(output[outputPos].string + LWS_SEND_BUFFER_PRE_PADDING, str,
+			output[outputPos].length + 1);
+		outputPos++;
 		outputMutex.unlock();
 		lws_callback_on_writable_all_protocol(lwsContext, lwsProtocol);
 		cout << wsi << ' ' << str << endl;
@@ -100,6 +112,7 @@ bool runLuaSandboxed(const char *code, int periodCounter, uint8_t result[LED_NUM
 }
 
 static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen, bool terminated) {
+	// cout << client.luaCodeBufferSize << ' ' << chunkLen << ' ' << client.luaCodeBufferSize + chunkLen << ' ' << LUA_CODE_LEN << endl;
 	if (client.luaCodeBufferSize + chunkLen > LUA_CODE_LEN) {
 		return 1;
 	}
@@ -124,13 +137,12 @@ static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen
 }
 
 static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *in, size_t len) {
-	int returnedValue = 0;
 
 	switch (reason) {
 		case LWS_CALLBACK_FILTER_NETWORK_CONNECTION: {
 			//lws_filter_network_conn_args *args = (lws_filter_network_conn_args*)user;
 			if (g_clientsData.size() > 8) { // TODO: configurable limit
-				returnedValue = 1; // disconnect
+				return -1; // disconnect
 			}
 			break;
 		}
@@ -149,19 +161,13 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 
 		case LWS_CALLBACK_RECEIVE: {
 			auto iClientData = g_clientsData.find(wsi);
-			if (iClientData == g_clientsData.end()) {
+			if (iClientData == g_clientsData.end() || iClientData->second.wsi == NULL) {
 				break;
 			}
-			char *data = (char*)in;
-			size_t offset = 0;
-			for (size_t i = 0; i < len; i++) {
-				if (data[i] == '\0' || data[i] == '`') { // TODO: remove `
-					wsDataReceived(iClientData->second, data + offset, i - offset, true);
-					offset = i + 1;
-				}
-			}
-			if (offset != len) {
-				wsDataReceived(iClientData->second, data + offset, len - offset, false);
+			if (wsDataReceived(iClientData->second, (char*)in, len, lws_is_final_fragment(wsi)) != 0) {
+				iClientData->second.wsi = NULL;
+				lws_close_reason(wsi, LWS_CLOSE_STATUS_MESSAGE_TOO_LARGE, NULL, 0);
+				return -1;
 			}
 			break;
 		}
@@ -172,14 +178,21 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 				break;
 			}
 			auto &clientData = iClientData->second;
-			clientData.outputMutex.lock();
-			for (auto &i : clientData.output) {
-				lws_write(wsi, (unsigned char *)i.c_str() + LWS_SEND_BUFFER_PRE_PADDING,
-					i.length() - LWS_SEND_BUFFER_PRE_PADDING - LWS_SEND_BUFFER_POST_PADDING,
-					LWS_WRITE_TEXT);
+			if (clientData.wsi == NULL) {
+				return -1;
 			}
-			clientData.output.clear();
+			if (clientData.outputPos <= 0) {
+				break;
+			}
+			clientData.outputMutex.lock();
+			auto output = clientData.output[--clientData.outputPos];
+			lws_write(wsi, output.string + LWS_SEND_BUFFER_PRE_PADDING, output.length, LWS_WRITE_TEXT);
+			free(output.string);
+			auto more = (bool)clientData.outputPos > 0;
 			clientData.outputMutex.unlock();
+			if (more) {
+				lws_callback_on_writable_all_protocol(clientData.lwsContext, clientData.lwsProtocol);
+			}
 			break;
 		}
 
@@ -188,10 +201,7 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 		}
 	}
 
-	fflush(stdout);
-	fflush(stderr);
-
-	return returnedValue;
+	return 0;
 }
 
 static struct lws_protocols protocols[] = {
@@ -283,6 +293,8 @@ int main() {
 
 	lua_pushcfunction(L, lua_timestamp);
 	lua_setglobal(L, "timestamp");
+	lua_pushinteger(L, PIX_NUM);
+	lua_setglobal(L, "PIX_NUM");
 
 	if (luaL_dofile(L, "../init.lua") != LUA_OK) {
 		fprintf(stderr, "%s", lua_tostring(L, -1));

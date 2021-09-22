@@ -4,34 +4,85 @@
 	<head>
 		<meta charset="utf-8">
 		<title>LED strip programming</title>
-		<link rel="stylesheet" href="styles.css">
+
+		<style>
+			body {
+				font-family: Monospace;
+				font-size: 11px;
+				background-color: lightgray;
+				tab-size: 4;
+			}
+
+			input {
+				font-family: Monospace;
+				font-size: 11px;
+			}
+
+			select {
+				font-family: Monospace;
+				font-size: 11px;
+			}
+
+			textarea {
+				font-family: Monospace;
+				font-size: 11px;
+			}
+
+			#codeArea {
+				width: 600pt;
+				height: 400pt;
+			}
+
+			.dot {
+				height: 16px;
+				width: 16px;
+				background-color: black;
+				border-radius: 50%;
+				display: inline-block;
+			}
+
+			#logContainer {
+				padding: 10px;
+				border: 1px solid silver;
+			}
+
+			#log {
+				resize: none;
+				width: 100%;
+				height: 100%;
+				padding: 10px;
+				margin: -10px;
+			}
+
+			table, th, td {
+				border: 1px solid black;
+			}
+
+			th, td {
+				padding: 10px;
+			}
+		</style>
 	</head>
 
 	<body>
 		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
 		<script>
 			function startWebsocket() {
-				let ws = new WebSocket('wss://coons.club/ledprg/ws');
+				window.ws = new WebSocket('wss://coons.club/ledprg/ws');
 				ws.onmessage = function(message) {
 					console.log(message.data);
 				}
 				ws.onopen = function (event) {
 					var connectionIndicator = document.getElementById('connectionIndicator');
-					connectionIndicator.style.backgroundColor = "red";
+					connectionIndicator.style.backgroundColor = 'red';
 				};
 				ws.onclose = function () {
 					var connectionIndicator = document.getElementById('connectionIndicator');
-					connectionIndicator.style.backgroundColor = "gray";
+					connectionIndicator.style.backgroundColor = 'gray';
 					setTimeout(function () {
 						startWebsocket()
-					}, 3000);
+					}, 1000);
 				};
-
-				// ws.on
-				window.runCode = function() {
-					ws.send(codeArea.getValue());
-					ws.send('\0');
-				}	
 			}
 			startWebsocket()
 
@@ -46,16 +97,17 @@
 					d.getSeconds().toString().padStart(2, '0') + '.' +
 					d.getMilliseconds().toString().padStart(3, '0');
 			}
+
 			document.addEventListener('DOMContentLoaded', function() {
 				var system_console_log = console.log;
 				var system_console_warn = console.error;
 				var system_console_error = console.error;
 				var logger = document.getElementById('log');
-				// try {
-				// 	logger.value = localStorage.getItem('pak_control_log');
-				// } catch (e) {
+				try {
+					codeArea.setValue(localStorage.getItem('code'));
+				} catch (e) {
 
-				// }
+				}
 				console.log = function (message) {
 					logger.value += 'I ' + log_timestamp() + ' ';
 					logger.value += message + '\n';
@@ -75,65 +127,87 @@
 					system_console_error(message);
 				};
 			});
+			window.addEventListener('beforeunload', function(event) {
+				try {
+					localStorage.setItem('code', codeArea.getValue());
+				} catch(e) {
+
+				}
+			});
 		</script>
 		<table>
 			<tr>
-				<td id="codeArea">-- random flashing
-result = {}
-for i = 1, 300, 1 do
+				<td id="codeArea"></td>
+				<td rowspan="2">
+					<span id="connectionIndicator" class="dot"></span>
+					<button type="button" onclick="ws.send(codeArea.getValue())"> > Run </button>
+					<p>Examples:</p>
+					<hr>
+<p style="white-space: pre">-- random flashing
+local result = {}
+
+for i = 1, PIX_NUM, 1 do
 	table.insert(result, math.random(0x00, 0x0f)) -- red
 	table.insert(result, math.random(0x00, 0x0f)) -- green
 	table.insert(result, math.random(0x00, 0x0f)) -- blue
 end
 
 return result, 200
-</td>
-				<td style="white-space: pre">
-<span id="connectionIndicator" class="dot"></span> <button type="button" onclick="runCode()"> > Run </button>
-
-Examples:
-<hr>-- random flashing
-result = {}
-for i = 1, 300, 1 do
-	table.insert(result, math.random(0x00, 0x0f)) -- red
-	table.insert(result, math.random(0x00, 0x0f)) -- green
-	table.insert(result, math.random(0x00, 0x0f)) -- blue
-end
-
-return result, 200
-<hr>-- running colors
+</p>
+					<hr>
+<p style="white-space: pre">-- running colors
 local result = {}
-local rfocus = PERIOD_COUNTER % 300
-local gfocus = (PERIOD_COUNTER + 100) % 300
-local bfocus = (PERIOD_COUNTER + 200) % 300
-for i = 1, 300, 1 do
-	table.insert(result, math.floor(255 / (math.abs(i - rfocus) + 1))) -- red
-	table.insert(result, math.floor(255 / (math.abs(i - gfocus) + 1))) -- green
-	table.insert(result, math.floor(255 / (math.abs(i - bfocus) + 1))) -- blue
+local third = PIX_NUM / 3
+local rfocus = PERIOD_COUNTER % PIX_NUM
+local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
+local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
+
+for i = 0, PIX_NUM - 1, 1 do
+	table.insert(result, math.floor(255 /
+		(math.abs(i - rfocus) + 1))) -- red
+	table.insert(result, math.floor(255 /
+		(math.abs(i - gfocus) + 1))) -- green
+	table.insert(result, math.floor(255 /
+		(math.abs(i - bfocus) + 1))) -- blue
 end
 
 return result, 50
-<hr>-- running colors
+</p>
+					<hr>
+<p style="white-space: pre">-- smooth running colors
 local result = {}
-local rfocus = PERIOD_COUNTER % 300
-local gfocus = (PERIOD_COUNTER + 100) % 300
-local bfocus = (PERIOD_COUNTER + 200) % 300
-for i = 1, 300, 1 do
-	table.insert(result, math.floor(255 / (math.abs(i - rfocus) + 1))) -- red
-	table.insert(result, math.floor(255 / (math.abs(i - gfocus) + 1))) -- green
-	table.insert(result, math.floor(255 / (math.abs(i - bfocus) + 1))) -- blue
+local third = PIX_NUM / 3
+local rfocus = PERIOD_COUNTER % PIX_NUM
+local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
+local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
+
+function color(focus, i)
+    local rdistance = math.abs(i - focus)
+    local ldistance = PIX_NUM - rdistance
+    return math.floor(255 / (math.min(rdistance, ldistance) + 1))
+end
+
+for i = 0, PIX_NUM - 1, 1 do
+	table.insert(result, color(rfocus, i)) -- red
+	table.insert(result, color(gfocus, i)) -- green
+	table.insert(result, color(bfocus, i)) -- blue
 end
 
 return result, 50
-</td>
+</p>
+				</td>
+			</tr>
+			<tr>
+				<td id="logContainer">
+					<textarea id="log" rows="16" readonly></textarea>
+				</td>
 			</tr>
 		</table>
-		<textarea id="log" rows="10" cols="100" readonly></textarea>
 		<script>
 			ace.config.set('basePath', 'https://pagecdn.io/lib/ace/1.4.12');
-			let codeArea = ace.edit('codeArea');
-			// codeArea.setTheme("ace/theme/monokai");
-			codeArea.session.setMode("ace/mode/lua");
+			window.codeArea = ace.edit('codeArea');
+			// codeArea.setTheme('ace/theme/monokai');
+			codeArea.session.setMode('ace/mode/lua');
 		</script>
 	</body>
 </html>

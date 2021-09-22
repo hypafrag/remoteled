@@ -14,11 +14,11 @@ local BASE_ENV = {}
 -- * math.randomseed: Can affect the host sytem
 -- * io.*, os.*: Most stuff there is unsafe, see below for exceptions
 
-RESULT_LEN = 300 * 3
+RESULT_LEN = PIX_NUM * 3
 
 RESULT_OFF = {}
 
-for _=1, 300 do
+for _=1, PIX_NUM do
 	table.insert(RESULT_OFF, 0)
 	table.insert(RESULT_OFF, 0)
 	table.insert(RESULT_OFF, 0)
@@ -26,8 +26,8 @@ end
 
 -- Safe packages/functions below
 ([[
-print timestamp
-RESULT_LEN RESULT_OFF
+timestamp
+RESULT_LEN RESULT_OFF PIX_NUM
 _VERSION assert error	ipairs   next pairs
 pcall	select tonumber tostring type unpack xpcall
 coroutine.create coroutine.resume coroutine.running coroutine.status
@@ -66,26 +66,31 @@ end)
 
 local function is_byte_array(t)
 	if type(t) ~= 'table' then
-		return false
+		return false, 'Returned value is not a byte array'
 	end
 	local i = 0
 	for _ in pairs(t) do
 		i = i + 1
-		if t[i] == nil or not (t[i] >= 0 and t[i] <= 255) then
-			print('--', i, t[i], type(t[i]))
-			return false
+		if t[i] == nil then
+			return false, 'Returned value is not a byte array. ' ..
+				string.format('Element %i is missing', i)
+		end
+		if not (t[i] >= 0 and t[i] <= 255) then
+			return false, 'Returned value is not a byte array. ' ..
+				string.format('Element %i is %s of type %s. Should be [0..255]',
+					i, tostring(t[i]), type(t[i]))
 		end
 	end
-	return true
+	return true, nil
 end
 
 function run_sandboxed(untrusted_code, period_counter)
 	BASE_ENV['PERIOD_COUNTER'] = period_counter
 	local untrusted_function, message = load(untrusted_code, nil, 't', BASE_ENV)
 	if not untrusted_function then
-		return false, message
+		return false, message, nil
 	end
-	success, result, delay = pcall(untrusted_function)
+	local success, result, delay = pcall(untrusted_function)
 	if success then
 		delay = delay or 1000
 		if delay < 50 then
@@ -94,8 +99,9 @@ function run_sandboxed(untrusted_code, period_counter)
 		-- if delay > 10000 then
 		-- 	return false, 'Delay shouldn\'t be greater then 10000', nil
 		-- end
-		if not is_byte_array(result) then
-			return false, 'Returned value is not a byte array', nil
+		local valid, message = is_byte_array(result)
+		if not valid then
+			return false, message, nil
 		end
 		if #result ~= RESULT_LEN then
 			return false, string.format('Result length should be %d bytes, actual is %d', RESULT_LEN, #result), nil
