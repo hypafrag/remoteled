@@ -27,7 +27,7 @@ end
 -- Safe packages/functions below
 ([[
 timestamp
-RESULT_LEN RESULT_OFF PIX_NUM
+RESULT_LEN RESULT_OFF PIX_NUM MIN_DELAY
 _VERSION assert error	ipairs   next pairs
 pcall	select tonumber tostring type unpack xpcall
 coroutine.create coroutine.resume coroutine.running coroutine.status
@@ -92,13 +92,10 @@ function run_sandboxed(untrusted_code, period_counter)
 	end
 	local success, result, delay = pcall(untrusted_function)
 	if success then
-		delay = delay or 1000
-		if delay < 50 then
-			return false, 'Delay should be less then 50', nil
+		delay = delay or MIN_DELAY
+		if delay < MIN_DELAY then
+			return false, 'Delay should be less then ' .. MIN_DELAY, nil
 		end
-		-- if delay > 10000 then
-		-- 	return false, 'Delay shouldn\'t be greater then 10000', nil
-		-- end
 		local valid, message = is_byte_array(result)
 		if not valid then
 			return false, message, nil

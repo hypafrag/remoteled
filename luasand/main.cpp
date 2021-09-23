@@ -23,6 +23,9 @@ using namespace std;
 #define WS_RX_BUFFER_BYTES (LUA_CODE_LEN + 1)
 #define PIX_NUM 300
 #define LED_NUM (300 * 3)
+#define MIN_DELAY 40
+#define MAX_DELAY (std::numeric_limits<lua_Integer>::max() - 1)
+#define FOREVER_DELAY (std::numeric_limits<lua_Integer>::max())
 
 struct ClientData {
 	ClientData()
@@ -66,18 +69,18 @@ unordered_map<lws*, ClientData> g_clientsData;
 int gSerialPort = -1;
 mutex gLuaMutex;
 char gLuaCode[LUA_CODE_LEN + 1] = {0};
-volatile int gPeriodicReset = 0;
+volatile lua_Integer gPeriodicReset = 0;
 lua_State *L = nullptr;
 auto gStartTime = std::chrono::high_resolution_clock::now();
 
-static int lua_timestamp(lua_State *L) {	
+static int lua_timestamp(lua_State *L) {
 	lua_pushinteger(L, chrono::duration_cast<chrono::nanoseconds>(
 		chrono::high_resolution_clock::now() - gStartTime).count());
     return 1;
 }
 
 // TODO: memory allocation limit
-bool runLuaSandboxed(const char *code, int periodCounter, uint8_t result[LED_NUM], int *delay, ClientData *client = nullptr) {
+bool runLuaSandboxed(const char *code, int periodCounter, uint8_t result[LED_NUM], lua_Integer *delay, ClientData *client = nullptr) {
 	lua_getglobal(L, "run_sandboxed");
 	lua_pushstring(L, code);
 	lua_pushinteger(L, periodCounter);
@@ -118,11 +121,15 @@ static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen
 	if (terminated) {
 		client.luaCodeBuffer[client.luaCodeBufferSize] = '\0';
 		uint8_t result[LED_NUM];
-		int delay;
+		lua_Integer delay;
 		gLuaMutex.lock();
 		if (runLuaSandboxed(client.luaCodeBuffer, 0, result, &delay, &client)) {
 			write(gSerialPort, result, LED_NUM);
-			memcpy(gLuaCode, client.luaCodeBuffer, client.luaCodeBufferSize + 1);
+			if (delay == std::numeric_limits<lua_Integer>::max()) {
+				gLuaCode[0] = '\0';
+			} else {
+				memcpy(gLuaCode, client.luaCodeBuffer, client.luaCodeBufferSize + 1);
+			}
 			gPeriodicReset = delay;
 			client.print("Accepted");
 		}
@@ -254,8 +261,8 @@ int openSerialPort(const char *name) {
 
 thread luaPeriodicThread([&](){
 	uint8_t result[LED_NUM];
-	int delay = 1000;
-	int counter = 1;
+	lua_Integer delay = 1000;
+	lua_Integer counter = 1;
 	while (true) {
 		if (gPeriodicReset) {
 			delay = gPeriodicReset;
@@ -265,24 +272,28 @@ thread luaPeriodicThread([&](){
 			gLuaMutex.lock();
 			if (gLuaCode[0] != '\0' && runLuaSandboxed(gLuaCode, counter, result, &delay)) {
 				write(gSerialPort, result, LED_NUM);
-				if (++counter >= 0x10000) {
+				if (counter == std::numeric_limits<lua_Integer>::max()) {
 					counter = 0;
+				} else {
+					counter++;
 				}
+			} else {
+				gLuaCode[0] = '\0';
 			}
 			gLuaMutex.unlock();
 		}
-		this_thread::sleep_for(chrono::milliseconds(delay % 50));
-		for (int i = 0; i < delay / 50; i++) {
+		this_thread::sleep_for(chrono::milliseconds(delay % MIN_DELAY));
+		for (int i = 0; i < delay / MIN_DELAY; i++) {
 			if (gPeriodicReset) {
 				break;
 			}
-			this_thread::sleep_for(chrono::milliseconds(50));
+			this_thread::sleep_for(chrono::milliseconds(MIN_DELAY));
 		}
 	}
 });
 
 int main() {
-	gSerialPort = openSerialPort("/dev/ttyACM2");
+	gSerialPort = openSerialPort("/dev/ttyACM1");
 
 	L = luaL_newstate();
 	luaL_openlibs(L);
@@ -291,6 +302,12 @@ int main() {
 	lua_setglobal(L, "timestamp");
 	lua_pushinteger(L, PIX_NUM);
 	lua_setglobal(L, "PIX_NUM");
+	lua_pushinteger(L, MIN_DELAY);
+	lua_setglobal(L, "MIN_DELAY");
+	lua_pushinteger(L, MAX_DELAY);
+	lua_setglobal(L, "MAX_DELAY");
+	lua_pushinteger(L, FOREVER_DELAY);
+	lua_setglobal(L, "FOREVER_DELAY");
 
 	if (luaL_dofile(L, "../init.lua") != LUA_OK) {
 		fprintf(stderr, "%s", lua_tostring(L, -1));
