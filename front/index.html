@@ -7,30 +7,27 @@
 
 		<style>
 			body {
+				display: grid;
+				grid-template-areas:
+					"a b"
+					"c b";
+				grid-template-rows: 60% 1fr;
+				grid-template-columns: 60% 1fr;
+				grid-gap: 4pt;
+				height: 100vh;
+				margin: 0;
+			}
+
+			body {
 				font-family: Monospace;
 				font-size: 11px;
 				background-color: lightgray;
 				tab-size: 4;
 			}
 
-			input {
-				font-family: Monospace;
-				font-size: 11px;
-			}
-
-			select {
-				font-family: Monospace;
-				font-size: 11px;
-			}
-
 			textarea {
 				font-family: Monospace;
 				font-size: 11px;
-			}
-
-			#codeArea {
-				width: 600pt;
-				height: 400pt;
 			}
 
 			.dot {
@@ -41,25 +38,16 @@
 				display: inline-block;
 			}
 
-			#logContainer {
-				padding: 10px;
-				border: 1px solid silver;
+			#codeArea {
+				margin: 1px;
 			}
 
-			#log {
+			textarea {
 				resize: none;
-				width: 100%;
-				height: 100%;
-				padding: 10px;
-				margin: -10px;
-			}
-
-			table, th, td {
-				border: 1px solid black;
-			}
-
-			th, td {
-				padding: 10px;
+				border: none;
+				outline: none;
+				padding: 0;
+				margin: 1px;
 			}
 		</style>
 	</head>
@@ -67,6 +55,20 @@
 	<body>
 		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
 		<script>
+			function copyToEditor(example) {
+				let p = document.getElementById(example);
+				codeArea.setValue(p.textContent, -1);
+			}
+
+			function copyToClipboard(example) {
+				let p = document.getElementById(example);
+				let range = document.createRange();
+				range.selectNode(p);
+				window.getSelection().removeAllRanges();
+				window.getSelection().addRange(range);
+				document.execCommand("copy");
+			}
+
 			function startWebsocket() {
 				window.ws = new WebSocket('wss://coons.club/ledprg/ws');
 				ws.onmessage = function(message) {
@@ -104,7 +106,12 @@
 				var system_console_error = console.error;
 				var logger = document.getElementById('log');
 				try {
-					codeArea.setValue(localStorage.getItem('code'));
+					let code = localStorage.getItem('code');
+					if (code === null || code === "") {
+						copyToEditor('randomFlashingP')
+					} else {
+						codeArea.setValue(code, -1);
+					}
 				} catch (e) {
 
 				}
@@ -135,15 +142,17 @@
 				}
 			});
 		</script>
-		<table>
-			<tr>
-				<td id="codeArea"></td>
-				<td rowspan="2">
-					<span id="connectionIndicator" class="dot"></span>
-					<button type="button" onclick="ws.send(codeArea.getValue())"> > Run </button>
-					<p>Examples:</p>
-					<hr>
-<p style="white-space: pre">-- random flashing
+		<div id="codeArea" style="grid-area: a;"></div>
+		<div style="grid-area: b; overflow-y: auto; overflow-x: hidden;">
+			<hr>
+			<span id="connectionIndicator" class="dot"></span>
+			<button type="button" onclick="ws.send(codeArea.getValue())"> &#x23E9; Run </button>
+<!-- ----------------------------------------------------------------------------------------- -->
+<p>Examples:</p>
+
+<hr>
+
+<p id="randomFlashingP" style="white-space: pre">-- random flashing
 local result = {}
 
 for i = 1, PIX_NUM, 1 do
@@ -154,8 +163,20 @@ end
 
 return result, 200
 </p>
-					<hr>
-<p style="white-space: pre">-- running colors
+<button type="button" onclick="copyToEditor('randomFlashingP')"> Copy to editor </button>
+<button type="button" onclick="copyToClipboard('randomFlashingP')"> Copy to clipboard </button>
+
+<hr>
+
+<p id="turnOffP" style="white-space: pre">-- turn off
+return RESULT_OFF
+</p>
+<button type="button" onclick="copyToEditor('turnOffP')"> Copy to editor </button>
+<button type="button" onclick="copyToClipboard('turnOffP')"> Copy to clipboard </button>
+	
+<hr>
+	
+<p id="runningColorsP" style="white-space: pre">-- running colors
 local result = {}
 local third = PIX_NUM / 3
 local rfocus = PERIOD_COUNTER % PIX_NUM
@@ -173,8 +194,12 @@ end
 
 return result, 50
 </p>
-					<hr>
-<p style="white-space: pre">-- smooth running colors
+<button type="button" onclick="copyToEditor('runningColorsP')"> Copy to editor </button>
+<button type="button" onclick="copyToClipboard('runningColorsP')"> Copy to clipboard </button>
+
+<hr>
+
+<p id="smoothRunningColorP" style="white-space: pre">-- smooth running colors
 local result = {}
 local third = PIX_NUM / 3
 local rfocus = PERIOD_COUNTER % PIX_NUM
@@ -195,14 +220,11 @@ end
 
 return result, 50
 </p>
-				</td>
-			</tr>
-			<tr>
-				<td id="logContainer">
-					<textarea id="log" rows="16" readonly></textarea>
-				</td>
-			</tr>
-		</table>
+<button type="button" onclick="copyToEditor('smoothRunningColorP')"> Copy to editor </button>
+<button type="button" onclick="copyToClipboard('smoothRunningColorP')"> Copy to clipboard </button>
+<!-- ----------------------------------------------------------------------------------------- -->
+		</div>
+		<textarea id="log" style="grid-area: c;" readonly></textarea>
 		<script>
 			ace.config.set('basePath', 'https://pagecdn.io/lib/ace/1.4.12');
 			window.codeArea = ace.edit('codeArea');

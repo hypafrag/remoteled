@@ -6,10 +6,6 @@ extern "C" {
 #include <libwebsockets.h>
 
 #include <iostream>
-#include <array>
-#include <vector>
-#include <queue>
-#include <string>
 #include <memory>
 #include <unordered_map>
 #include <thread>
