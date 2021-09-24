@@ -9,9 +9,10 @@
 			body {
 				display: grid;
 				grid-template-areas:
+					"a d"
 					"a b"
 					"c b";
-				grid-template-rows: 60% 1fr;
+				grid-template-rows: 44pt 60% 1fr;
 				grid-template-columns: 60% 1fr;
 				grid-gap: 4pt;
 				height: 100vh;
@@ -21,7 +22,7 @@
 			body {
 				font-family: Monospace;
 				font-size: 11px;
-				background-color: lightgray;
+				background-color: #d3d3d3;
 				tab-size: 4;
 			}
 
@@ -31,11 +32,16 @@
 			}
 
 			.dot {
-				height: 16px;
-				width: 16px;
+				height: 16pt;
+				width: 16pt;
 				background-color: black;
 				border-radius: 50%;
 				display: inline-block;
+				vertical-align: middle;
+			}
+
+			button {
+				height: 30pt;
 			}
 
 			#codeArea {
@@ -54,6 +60,239 @@
 
 	<body>
 		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
+		<script>
+			let codeExamples = [
+
+`-- random flashing
+
+local result = {}
+
+for i = 1, PIX_NUM do
+    addcolor(result, math.random(0x000000, 0xffffff))
+end
+
+return result, 200
+`,
+
+`-- dim random flashing
+
+local result = {}
+
+for i = 1, PIX_NUM do
+	table.insert(result, math.random(0x00, 0x0f)) -- red
+	table.insert(result, math.random(0x00, 0x0f)) -- green
+	table.insert(result, math.random(0x00, 0x0f)) -- blue
+end
+
+return result, 200
+`,
+
+`-- turn off
+
+return RESULT_OFF, DELAY_FOREVER
+`,
+
+`-- running colors
+
+local result = {}
+local third = PIX_NUM / 3
+local rfocus = PERIOD_COUNTER % PIX_NUM
+local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
+local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
+
+function color(focus, i)
+    local rdistance = math.abs(i - focus)
+    local ldistance = PIX_NUM - rdistance
+    return math.floor(255 / (math.min(rdistance, ldistance) + 1))
+end
+
+for i = 0, PIX_NUM - 1 do
+	table.insert(result, color(rfocus, i)) -- red
+	table.insert(result, color(gfocus, i)) -- green
+	table.insert(result, color(bfocus, i)) -- blue
+end
+
+return result, DELAY_MIN
+`,
+
+`-- fast running colors ping pong (hypnofrog)
+
+local result = {}
+local third = PIX_NUM / 3
+local phase = PERIOD_COUNTER * 16
+phase = phase % (PIX_NUM * 2)
+if phase > PIX_NUM then
+    phase = PIX_NUM - (phase - PIX_NUM)
+end
+local rfocus = phase % PIX_NUM
+local gfocus = (phase + third) % PIX_NUM
+local bfocus = (phase + third * 2) % PIX_NUM
+
+function color(focus, i)
+    local rdistance = math.abs(i - focus)
+    local ldistance = PIX_NUM - rdistance
+    return math.floor(255 / (math.min(rdistance, ldistance) + 1))
+end
+
+for i = 0, PIX_NUM - 1 do
+	table.insert(result, color(rfocus, i)) -- red
+	table.insert(result, color(gfocus, i)) -- green
+	table.insert(result, color(bfocus, i)) -- blue
+end
+
+return result, DELAY_MIN
+`,
+
+`-- running colors 2 octaves
+
+local result = {}
+local third = PIX_NUM / 3
+local phase = PERIOD_COUNTER
+phase = phase % (PIX_NUM * 2)
+if phase > PIX_NUM then
+	phase = PIX_NUM - (phase - PIX_NUM)
+end
+local rfocus1 = phase % PIX_NUM
+local gfocus1 = (phase + third) % PIX_NUM
+local bfocus1 = (phase + third * 2) % PIX_NUM
+
+phase = PIX_NUM - phase
+
+local bfocus2 = phase % PIX_NUM
+local gfocus2 = (phase + third) % PIX_NUM
+local rfocus2 = (phase + third * 2) % PIX_NUM
+
+function color(focus, i)
+	local rdistance = math.abs(i - focus)
+	local ldistance = PIX_NUM - rdistance
+	return math.floor(255 / (math.min(rdistance, ldistance) + 1))
+end
+
+local chunklen = 10
+local offset = PERIOD_COUNTER % (chunklen * 2) - chunklen
+
+for i = 0, PIX_NUM - 1 do
+	if (i + offset) % (chunklen * 2) > chunklen - 1 then
+		table.insert(result, color(rfocus1, i)) -- red
+		table.insert(result, color(gfocus1, i)) -- green
+		table.insert(result, color(bfocus1, i)) -- blue
+	else
+		table.insert(result, color(rfocus2, i)) -- red
+		table.insert(result, color(gfocus2, i)) -- green
+		table.insert(result, color(bfocus2, i)) -- blue
+	end
+end
+
+return result, DELAY_MIN
+`,
+
+`-- sonar
+
+local result = {}
+
+local offset = 54
+local lens = { 28, 25, 24, 23, 22, 20, 18, 17, 16, 15, 14, 13 }
+
+local rings = {}
+local posstart = offset
+for i = 1, #lens do
+    local posend = posstart + lens[i]
+    table.insert(rings, { posstart, posend })
+    posstart = posend + 1
+end
+
+local ringi = #rings - PERIOD_COUNTER % #rings
+local posstart, posend = table.unpack(rings[ringi])
+local pingled = 198
+local pingring = 5
+
+for i = 1, PIX_NUM do
+    if i == pingled then
+        local distance = #rings - ringi + pingring
+        if ringi <= pingring then
+            distance = distance - #rings
+        end
+        local f = 1.0 - distance / #rings
+        f = f * f
+        addcolor(result, 0x000100 * math.floor(f * 160))
+    elseif i >= posstart and i <= posend then
+        addcolor(result, 0x000800)
+    else
+        addcolor(result, 0x000000)
+    end
+end
+
+return result, 80
+`,
+
+`-- radar scope
+
+local result = {}
+for i = 1, PIX_NUM do
+    addcolor(result, 0x000000)
+end
+
+local offset = 54
+local lens = { 28, 25, 24, 23, 22, 20, 18, 17, 16, 15, 14, 13 }
+local angles = { 165.0, 140.0, 140.0, 135.0, 110.0, 90.0, 85.0, 85.0, 80.0, 70.0, 65.0, 45.0 }
+
+local rings = {}
+local posstart = offset
+for i = 1, #lens do
+    local posend = posstart + lens[i]
+    table.insert(rings, { posstart, posend })
+    posstart = posend + 1
+end
+
+local anglesteps = {}
+for i = 1, #lens do
+    table.insert(anglesteps, 360.0 / lens[i])
+end
+
+local threshold = 10.0
+local beamazimuth = (PERIOD_COUNTER * 10 + PERIOD_COUNTER / 360) % 360
+local pingazimuth = 130.0
+local pingduration = 200.0
+local pingindex = 198
+local pingintensity = 200.0
+
+if beamazimuth > pingazimuth and beamazimuth < pingazimuth + pingduration then
+    local f = 1.0 - (beamazimuth - pingazimuth) / pingduration
+    f = f * f
+    setcolor(result, pingindex, math.floor(f * pingintensity) * 0x100)
+end
+
+for i = 1, #angles do
+    local angle = angles[i]
+    local azimuth = beamazimuth
+    if angle > azimuth then
+        azimuth = azimuth + 360.0
+    end
+    local anglestep = anglesteps[i]
+    local posstart, posend = table.unpack(rings[i])
+
+    local mindiff = 1000.0
+    local selectedpos = 0
+
+    for j = posend, posstart, -1 do
+        local diff = math.abs(azimuth - angle)
+        if diff < mindiff then
+            mindiff = diff
+            selectedpos = j
+        end
+        angle = angle + anglestep
+    end
+
+    if mindiff < threshold then
+        local intensity = math.floor(((threshold - mindiff) / threshold) * 30)
+        result[(selectedpos - 1) * 3 + 2] = intensity;
+    end
+end
+
+return result, DELAY_MIN
+`
+			];
+		</script>
 		<script>
 			function copyToEditor(example) {
 				let p = document.getElementById(example);
@@ -133,6 +372,32 @@
 					logger.scrollTop = logger.scrollHeight;
 					system_console_error(message);
 				};
+
+				codeExamples.forEach((code, index) => {
+					let examplesArea = document.getElementById('examplesArea');
+					examplesArea.append(document.createElement('hr'));
+
+					let codeP = document.createElement('p');
+					codeP.textContent = code;
+					codeP.style = "white-space: pre";
+					examplesArea.append(codeP);
+
+					let copyToEditorButton = document.createElement('button');
+					copyToEditorButton.textContent = '\u{1f4cb}Copy to editor';
+					copyToEditorButton.onclick = () => codeArea.setValue(code, -1);
+					examplesArea.append(copyToEditorButton);
+
+					let copyToClipboardButton = document.createElement('button');
+					copyToClipboardButton.textContent = '\u{1f4d1} Copy to clipboard';
+					copyToClipboardButton.onclick = () => navigator.clipboard.writeText(code);
+					examplesArea.append(copyToClipboardButton);
+
+					let runButton = document.createElement('button');
+					runButton.textContent = '\u{1f3c3} Run example';
+					runButton.onclick = () => ws.send(code);
+					examplesArea.append(runButton);
+				});
+				examplesArea.append(document.createElement('hr'));
 			});
 			window.addEventListener('beforeunload', function(event) {
 				try {
@@ -143,86 +408,14 @@
 			});
 		</script>
 		<div id="codeArea" style="grid-area: a;"></div>
-		<div style="grid-area: b; overflow-y: auto; overflow-x: hidden;">
+		<div class="panel" style="grid-area: d;">
 			<hr>
 			<span id="connectionIndicator" class="dot"></span>
-			<button type="button" onclick="ws.send(codeArea.getValue())"> &#x23E9; Run </button>
-<!-- ----------------------------------------------------------------------------------------- -->
-<p>Examples:</p>
-
-<hr>
-
-<p id="randomFlashingP" style="white-space: pre">-- random flashing
-local result = {}
-
-for i = 1, PIX_NUM, 1 do
-	table.insert(result, math.random(0x00, 0x0f)) -- red
-	table.insert(result, math.random(0x00, 0x0f)) -- green
-	table.insert(result, math.random(0x00, 0x0f)) -- blue
-end
-
-return result, 200
-</p>
-<button type="button" onclick="copyToEditor('randomFlashingP')"> Copy to editor </button>
-<button type="button" onclick="copyToClipboard('randomFlashingP')"> Copy to clipboard </button>
-
-<hr>
-
-<p id="turnOffP" style="white-space: pre">-- turn off
-return RESULT_OFF
-</p>
-<button type="button" onclick="copyToEditor('turnOffP')"> Copy to editor </button>
-<button type="button" onclick="copyToClipboard('turnOffP')"> Copy to clipboard </button>
-	
-<hr>
-	
-<p id="runningColorsP" style="white-space: pre">-- running colors
-local result = {}
-local third = PIX_NUM / 3
-local rfocus = PERIOD_COUNTER % PIX_NUM
-local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
-local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
-
-for i = 0, PIX_NUM - 1, 1 do
-	table.insert(result, math.floor(255 /
-		(math.abs(i - rfocus) + 1))) -- red
-	table.insert(result, math.floor(255 /
-		(math.abs(i - gfocus) + 1))) -- green
-	table.insert(result, math.floor(255 /
-		(math.abs(i - bfocus) + 1))) -- blue
-end
-
-return result, 50
-</p>
-<button type="button" onclick="copyToEditor('runningColorsP')"> Copy to editor </button>
-<button type="button" onclick="copyToClipboard('runningColorsP')"> Copy to clipboard </button>
-
-<hr>
-
-<p id="smoothRunningColorP" style="white-space: pre">-- smooth running colors
-local result = {}
-local third = PIX_NUM / 3
-local rfocus = PERIOD_COUNTER % PIX_NUM
-local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
-local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
-
-function color(focus, i)
-    local rdistance = math.abs(i - focus)
-    local ldistance = PIX_NUM - rdistance
-    return math.floor(255 / (math.min(rdistance, ldistance) + 1))
-end
-
-for i = 0, PIX_NUM - 1, 1 do
-	table.insert(result, color(rfocus, i)) -- red
-	table.insert(result, color(gfocus, i)) -- green
-	table.insert(result, color(bfocus, i)) -- blue
-end
-
-return result, 50
-</p>
-<button type="button" onclick="copyToEditor('smoothRunningColorP')"> Copy to editor </button>
-<button type="button" onclick="copyToClipboard('smoothRunningColorP')"> Copy to clipboard </button>
-<!-- ----------------------------------------------------------------------------------------- -->
+			<button type="button" onclick="ws.send(codeArea.getValue())">&#x1f3c3; Run from editor</button>	
+			<hr>
+		</div>
+		<div id="examplesArea" style="grid-area: b; overflow-y: auto; overflow-x: hidden;">
+			<p>Examples:</p>
 		</div>
 		<textarea id="log" style="grid-area: c;" readonly></textarea>
 		<script>

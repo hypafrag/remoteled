@@ -76,7 +76,31 @@ auto gStartTime = std::chrono::high_resolution_clock::now();
 static int lua_timestamp(lua_State *L) {
 	lua_pushinteger(L, chrono::duration_cast<chrono::nanoseconds>(
 		chrono::high_resolution_clock::now() - gStartTime).count());
-    return 1;
+	return 1;
+}
+
+static int lua_addcolor(lua_State *L) {
+	auto color = lua_tointeger(L, 2);
+	auto len = lua_rawlen(L, 1);
+	lua_pushinteger(L, color >> 16);
+	lua_rawseti(L, 1, ++len);
+	lua_pushinteger(L, (color & 0xff00) >> 8);
+	lua_rawseti(L, 1, ++len);
+	lua_pushinteger(L, color & 0xff);
+	lua_rawseti(L, 1, ++len);
+    return 0;
+}
+
+static int lua_setcolor(lua_State *L) {
+	auto color = lua_tointeger(L, 3);
+	auto index = (lua_tointeger(L, 2) - 1) * 3;
+	lua_pushinteger(L, color >> 16);
+	lua_rawseti(L, 1, ++index);
+	lua_pushinteger(L, (color & 0xff00) >> 8);
+	lua_rawseti(L, 1, ++index);
+	lua_pushinteger(L, color & 0xff);
+	lua_rawseti(L, 1, ++index);
+    return 0;
 }
 
 // TODO: memory allocation limit
@@ -300,6 +324,11 @@ int main() {
 
 	lua_pushcfunction(L, lua_timestamp);
 	lua_setglobal(L, "timestamp");
+	lua_pushcfunction(L, lua_addcolor);
+	lua_setglobal(L, "addcolor");
+	lua_pushcfunction(L, lua_setcolor);
+	lua_setglobal(L, "setcolor");
+
 	lua_pushinteger(L, PIX_NUM);
 	lua_setglobal(L, "PIX_NUM");
 	lua_pushinteger(L, MIN_DELAY);

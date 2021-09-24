@@ -26,10 +26,10 @@ end
 
 -- Safe packages/functions below
 ([[
-timestamp
+timestamp addcolor setcolor
 RESULT_LEN RESULT_OFF PIX_NUM MIN_DELAY
 _VERSION assert error	ipairs   next pairs
-pcall	select tonumber tostring type unpack xpcall
+pcall	select tonumber tostring type xpcall
 coroutine.create coroutine.resume coroutine.running coroutine.status
 coroutine.wrap   coroutine.yield
 math.abs   math.acos math.asin  math.atan math.atan2 math.ceil
@@ -41,7 +41,7 @@ os.clock os.difftime os.time os.date
 string.byte string.char  string.find  string.format string.gmatch
 string.gsub string.len   string.lower string.match  string.reverse
 string.sub  string.upper
-table.insert table.maxn table.remove table.sort
+table.insert table.maxn table.remove table.sort table.unpack
 ]]):gsub('%S+', function(id)
 	local module, method = id:match('([^%.]+)%.([^%.]+)')
 	if module then

@@ -92,7 +92,7 @@ return result, 50
 
 --
 
--- smooth running colors ping pong (hypnofrog)
+-- fast running colors ping pong (hypnofrog)
 local result = {}
 local third = PIX_NUM / 3
 local phase = PERIOD_COUNTER * 16
@@ -116,7 +116,7 @@ for i = 0, PIX_NUM - 1, 1 do
 	table.insert(result, color(bfocus, i)) -- blue
 end
 
-return result, 40
+return result, DELAY_MIN
 
 --
 
@@ -145,7 +145,6 @@ function color(focus, i)
 end
 
 local chunklen = 10
--- local offset = PERIOD_COUNTER % chunklen
 local offset = PERIOD_COUNTER % (chunklen * 2) - chunklen
 
 for i = 0, PIX_NUM - 1, 1 do
@@ -160,6 +159,45 @@ for i = 0, PIX_NUM - 1, 1 do
     end
 end
 
-return result, 50
+return result, DELAY_MIN
+
+--
+
+function pushcolor(c)
+    local r = math.floor(c / 0x10000)
+    local g = math.floor((c - r * 0x10000) / 0x100)
+    local b = c % 0x100
+    table.insert(result, r)
+    table.insert(result, g)
+    table.insert(result, b)
+end
+
+--
+
+-- coil concentric pulse
+
+local result = {}
+local lens = { 54, 28, 25, 24, 23, 22, 20, 18, 17, 16, 15, 14, 13 }
+local angles = { 165, 140, 140, 135, 110, 90, 85, 85, 80, 70, 65, 45  }
+
+local cases = {}
+local posstart = lens[1]
+for i = 2, #lens do
+    local posend = posstart + lens[i]
+    table.insert(cases, { posstart, posend })
+    posstart = posend + 1
+end
+
+local posstart, posend = table.unpack(cases[13])
+
+for i = 1, PIX_NUM do
+    if i == posstart then
+        addcolor(result, 0x001100)
+    else
+        addcolor(result, 0x000000)
+    end
+end
+
+return result, DELAY_MIN
 
 --
