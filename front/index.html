@@ -68,7 +68,7 @@
 local result = {}
 
 for i = 1, PIX_NUM do
-    addcolor(result, math.random(0x000000, 0xffffff))
+	addcolor(result, math.random(0x000000, 0xffffff))
 end
 
 return result, 200
@@ -100,10 +100,10 @@ local rfocus = PERIOD_COUNTER % PIX_NUM
 local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
 local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
 
-function color(focus, i)
-    local rdistance = math.abs(i - focus)
-    local ldistance = PIX_NUM - rdistance
-    return math.floor(255 / (math.min(rdistance, ldistance) + 1))
+local function color(focus, i)
+	local rdistance = math.abs(i - focus)
+	local ldistance = PIX_NUM - rdistance
+	return math.floor(255 / (math.min(rdistance, ldistance) + 1))
 end
 
 for i = 0, PIX_NUM - 1 do
@@ -115,6 +115,30 @@ end
 return result, DELAY_MIN
 `,
 
+`-- running gaps
+
+local result = {}
+
+local gap = 2
+local step = -1  -- [-gap .. gap]
+local speed = 0.6 -- (0 .. 1.0]
+
+local offset = gap + 1
+local phase = (math.floor(PERIOD_COUNTER * speed) * (offset + step)) % offset
+
+for i = 1, PIX_NUM do
+	if i % offset == phase then
+		table.insert(result, math.random(0x00, 0x0f)) -- red
+		table.insert(result, math.random(0x00, 0x0f)) -- green
+		table.insert(result, math.random(0x00, 0x0f)) -- blue
+	else
+		addcolor(result, 0x000000)
+	end
+end
+
+return result, 100
+`,
+
 `-- fast running colors ping pong (hypnofrog)
 
 local result = {}
@@ -122,16 +146,16 @@ local third = PIX_NUM / 3
 local phase = PERIOD_COUNTER * 16
 phase = phase % (PIX_NUM * 2)
 if phase > PIX_NUM then
-    phase = PIX_NUM - (phase - PIX_NUM)
+	phase = PIX_NUM - (phase - PIX_NUM)
 end
 local rfocus = phase % PIX_NUM
 local gfocus = (phase + third) % PIX_NUM
 local bfocus = (phase + third * 2) % PIX_NUM
 
-function color(focus, i)
-    local rdistance = math.abs(i - focus)
-    local ldistance = PIX_NUM - rdistance
-    return math.floor(255 / (math.min(rdistance, ldistance) + 1))
+local function color(focus, i)
+	local rdistance = math.abs(i - focus)
+	local ldistance = PIX_NUM - rdistance
+	return math.floor(255 / (math.min(rdistance, ldistance) + 1))
 end
 
 for i = 0, PIX_NUM - 1 do
@@ -162,7 +186,7 @@ local bfocus2 = phase % PIX_NUM
 local gfocus2 = (phase + third) % PIX_NUM
 local rfocus2 = (phase + third * 2) % PIX_NUM
 
-function color(focus, i)
+local function color(focus, i)
 	local rdistance = math.abs(i - focus)
 	local ldistance = PIX_NUM - rdistance
 	return math.floor(255 / (math.min(rdistance, ldistance) + 1))
@@ -186,7 +210,7 @@ end
 return result, DELAY_MIN
 `,
 
-`-- sonar
+`-- sonar scope
 
 local result = {}
 
@@ -196,9 +220,9 @@ local lens = { 28, 25, 24, 23, 22, 20, 18, 17, 16, 15, 14, 13 }
 local rings = {}
 local posstart = offset
 for i = 1, #lens do
-    local posend = posstart + lens[i]
-    table.insert(rings, { posstart, posend })
-    posstart = posend + 1
+	local posend = posstart + lens[i]
+	table.insert(rings, { posstart, posend })
+	posstart = posend + 1
 end
 
 local ringi = #rings - PERIOD_COUNTER % #rings
@@ -207,19 +231,19 @@ local pingled = 198
 local pingring = 5
 
 for i = 1, PIX_NUM do
-    if i == pingled then
-        local distance = #rings - ringi + pingring
-        if ringi <= pingring then
-            distance = distance - #rings
-        end
-        local f = 1.0 - distance / #rings
-        f = f * f
-        addcolor(result, 0x000100 * math.floor(f * 160))
-    elseif i >= posstart and i <= posend then
-        addcolor(result, 0x000800)
-    else
-        addcolor(result, 0x000000)
-    end
+	if i == pingled then
+		local distance = #rings - ringi + pingring
+		if ringi <= pingring then
+			distance = distance - #rings
+		end
+		local f = 1.0 - distance / #rings
+		f = f * f
+		addcolor(result, 0x000100 * math.floor(f * 160))
+	elseif i >= posstart and i <= posend then
+		addcolor(result, 0x000800)
+	else
+		addcolor(result, 0x000000)
+	end
 end
 
 return result, 80
@@ -229,7 +253,7 @@ return result, 80
 
 local result = {}
 for i = 1, PIX_NUM do
-    addcolor(result, 0x000000)
+	addcolor(result, 0x000000)
 end
 
 local offset = 54
@@ -239,14 +263,14 @@ local angles = { 165.0, 140.0, 140.0, 135.0, 110.0, 90.0, 85.0, 85.0, 80.0, 70.0
 local rings = {}
 local posstart = offset
 for i = 1, #lens do
-    local posend = posstart + lens[i]
-    table.insert(rings, { posstart, posend })
-    posstart = posend + 1
+	local posend = posstart + lens[i]
+	table.insert(rings, { posstart, posend })
+	posstart = posend + 1
 end
 
 local anglesteps = {}
 for i = 1, #lens do
-    table.insert(anglesteps, 360.0 / lens[i])
+	table.insert(anglesteps, 360.0 / lens[i])
 end
 
 local threshold = 10.0
@@ -257,36 +281,36 @@ local pingindex = 198
 local pingintensity = 200.0
 
 if beamazimuth > pingazimuth and beamazimuth < pingazimuth + pingduration then
-    local f = 1.0 - (beamazimuth - pingazimuth) / pingduration
-    f = f * f
-    setcolor(result, pingindex, math.floor(f * pingintensity) * 0x100)
+	local f = 1.0 - (beamazimuth - pingazimuth) / pingduration
+	f = f * f
+	setcolor(result, pingindex, math.floor(f * pingintensity) * 0x100)
 end
 
 for i = 1, #angles do
-    local angle = angles[i]
-    local azimuth = beamazimuth
-    if angle > azimuth then
-        azimuth = azimuth + 360.0
-    end
-    local anglestep = anglesteps[i]
-    local posstart, posend = table.unpack(rings[i])
+	local angle = angles[i]
+	local azimuth = beamazimuth
+	if angle > azimuth then
+		azimuth = azimuth + 360.0
+	end
+	local anglestep = anglesteps[i]
+	local posstart, posend = table.unpack(rings[i])
 
-    local mindiff = 1000.0
-    local selectedpos = 0
+	local mindiff = 1000.0
+	local selectedpos = 0
 
-    for j = posend, posstart, -1 do
-        local diff = math.abs(azimuth - angle)
-        if diff < mindiff then
-            mindiff = diff
-            selectedpos = j
-        end
-        angle = angle + anglestep
-    end
+	for j = posend, posstart, -1 do
+		local diff = math.abs(azimuth - angle)
+		if diff < mindiff then
+			mindiff = diff
+			selectedpos = j
+		end
+		angle = angle + anglestep
+	end
 
-    if mindiff < threshold then
-        local intensity = math.floor(((threshold - mindiff) / threshold) * 30)
-        result[(selectedpos - 1) * 3 + 2] = intensity;
-    end
+	if mindiff < threshold then
+		local intensity = math.floor(((threshold - mindiff) / threshold) * 30)
+		result[(selectedpos - 1) * 3 + 2] = intensity;
+	end
 end
 
 return result, DELAY_MIN

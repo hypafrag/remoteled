@@ -27,7 +27,7 @@ end
 -- Safe packages/functions below
 ([[
 timestamp addcolor setcolor
-RESULT_LEN RESULT_OFF PIX_NUM MIN_DELAY
+RESULT_LEN RESULT_OFF PIX_NUM DELAY_MIN DELAY_MAX DELAY_FOREVER
 _VERSION assert error	ipairs   next pairs
 pcall	select tonumber tostring type xpcall
 coroutine.create coroutine.resume coroutine.running coroutine.status
@@ -56,13 +56,17 @@ local function protect_module(module, module_name)
 	return setmetatable({}, {
 		__index = module,
 		__newindex = function(_, attr_name, _)
-		error('Can not modify ' .. module_name .. '.' .. attr_name .. '. Protected by the sandbox.')
-	end})
+			print(module_name, attr_name)
+			error('Can not modify ' .. module_name .. '.' .. attr_name .. '. Protected by the sandbox.')
+		end
+	})
 end
 
 ('coroutine math os string table'):gsub('%S+', function(module_name)
 	BASE_ENV[module_name] = protect_module(BASE_ENV[module_name], module_name)
 end)
+
+BASE_ENV_PROTECTED = protect_module(BASE_ENV, '_G')
 
 local function is_byte_array(t)
 	if type(t) ~= 'table' then
@@ -86,15 +90,18 @@ end
 
 function run_sandboxed(untrusted_code, period_counter)
 	BASE_ENV['PERIOD_COUNTER'] = period_counter
-	local untrusted_function, message = load(untrusted_code, nil, 't', BASE_ENV)
+	local untrusted_function, message = load(untrusted_code, nil, 't', BASE_ENV_PROTECTED)
 	if not untrusted_function then
 		return false, message, nil
 	end
 	local success, result, delay = pcall(untrusted_function)
 	if success then
-		delay = delay or MIN_DELAY
-		if delay < MIN_DELAY then
-			return false, 'Delay should be less then ' .. MIN_DELAY, nil
+		delay = delay or DELAY_MIN
+		if delay < DELAY_MIN then
+			return false, 'Delay shouldn\'t be less then ' .. DELAY_MIN, nil
+		end
+		if delay > DELAY_MAX and delay ~= DELAY_FOREVER then
+			return false, 'Delay shouldn\'t be more then ' .. DELAY_MAX, nil
 		end
 		local valid, message = is_byte_array(result)
 		if not valid then

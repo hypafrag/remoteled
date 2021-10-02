@@ -23,9 +23,9 @@ using namespace std;
 #define WS_RX_BUFFER_BYTES (LUA_CODE_LEN + 1)
 #define PIX_NUM 300
 #define LED_NUM (300 * 3)
-#define MIN_DELAY 40
-#define MAX_DELAY (std::numeric_limits<lua_Integer>::max() - 1)
-#define FOREVER_DELAY (std::numeric_limits<lua_Integer>::max())
+#define DELAY_MIN 40
+#define DELAY_MAX 999999999
+#define DELAY_FOREVER 1000000000
 
 struct ClientData {
 	ClientData()
@@ -306,18 +306,18 @@ thread luaPeriodicThread([&](){
 			}
 			gLuaMutex.unlock();
 		}
-		this_thread::sleep_for(chrono::milliseconds(delay % MIN_DELAY));
-		for (int i = 0; i < delay / MIN_DELAY; i++) {
+		this_thread::sleep_for(chrono::milliseconds(delay % DELAY_MIN));
+		for (int i = 0; i < delay / DELAY_MIN; i++) {
 			if (gPeriodicReset) {
 				break;
 			}
-			this_thread::sleep_for(chrono::milliseconds(MIN_DELAY));
+			this_thread::sleep_for(chrono::milliseconds(DELAY_MIN));
 		}
 	}
 });
 
 int main() {
-	gSerialPort = openSerialPort("/dev/ttyACM1");
+	gSerialPort = openSerialPort("/dev/ttyACM0");
 
 	L = luaL_newstate();
 	luaL_openlibs(L);
@@ -331,22 +331,17 @@ int main() {
 
 	lua_pushinteger(L, PIX_NUM);
 	lua_setglobal(L, "PIX_NUM");
-	lua_pushinteger(L, MIN_DELAY);
-	lua_setglobal(L, "MIN_DELAY");
-	lua_pushinteger(L, MAX_DELAY);
-	lua_setglobal(L, "MAX_DELAY");
-	lua_pushinteger(L, FOREVER_DELAY);
-	lua_setglobal(L, "FOREVER_DELAY");
+	lua_pushinteger(L, DELAY_MIN);
+	lua_setglobal(L, "DELAY_MIN");
+	lua_pushinteger(L, DELAY_MAX);
+	lua_setglobal(L, "DELAY_MAX");
+	lua_pushinteger(L, DELAY_FOREVER);
+	lua_setglobal(L, "DELAY_FOREVER");
 
 	if (luaL_dofile(L, "../init.lua") != LUA_OK) {
 		fprintf(stderr, "%s", lua_tostring(L, -1));
 		return 1;
 	}
-
-	// if (luaL_dofile(L, "../test.lua") != LUA_OK) {
-	// 	fprintf(stderr, "%s", lua_tostring(L, -1));
-	// 	return 1;
-	// }
 
 	lws_context_creation_info info;
 	memset(&info, 0, sizeof(info));
