@@ -7,5 +7,7 @@ set(CMAKE_CXX_STANDARD 14)
 
 set(SOURCE_FILES main.cpp)
 
+link_directories(/usr/lib/lua5.3)
+
 add_executable(luasand ${SOURCE_FILES})
-target_link_libraries(luasand lua5.3 ssl crypto websockets pthread)
+target_link_libraries(luasand lua ssl crypto websockets pthread)

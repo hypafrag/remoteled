@@ -388,7 +388,7 @@ return result, DELAY_MIN
 			}
 
 			function startWebsocket() {
-				window.ws = new WebSocket('wss://coons.club/ledprg/ws');
+				window.ws = new WebSocket((location.protocol == 'https:' ? 'wss://' : 'ws://') + location.host, 'code');
 				ws.onmessage = function(message) {
 					console.log(message.data);
 				}

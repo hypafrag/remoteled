@@ -1,7 +1,7 @@
 extern "C" {
-	#include <lua/lua.h>
-	#include <lua/lualib.h>
-	#include <lua/lauxlib.h>
+	#include <lua5.3/lua.h>
+	#include <lua5.3/lualib.h>
+	#include <lua5.3/lauxlib.h>
 }
 #include <libwebsockets.h>
 
@@ -72,6 +72,7 @@ char gLuaCode[LUA_CODE_LEN + 1] = {0};
 volatile lua_Integer gPeriodicReset = 0;
 lua_State *L = nullptr;
 auto gStartTime = std::chrono::high_resolution_clock::now();
+volatile bool gRunning = true;
 
 static int lua_timestamp(lua_State *L) {
 	lua_pushinteger(L, chrono::duration_cast<chrono::nanoseconds>(
@@ -88,7 +89,7 @@ static int lua_addcolor(lua_State *L) {
 	lua_rawseti(L, 1, ++len);
 	lua_pushinteger(L, color & 0xff);
 	lua_rawseti(L, 1, ++len);
-    return 0;
+	return 0;
 }
 
 static int lua_setcolor(lua_State *L) {
@@ -100,7 +101,7 @@ static int lua_setcolor(lua_State *L) {
 	lua_rawseti(L, 1, ++index);
 	lua_pushinteger(L, color & 0xff);
 	lua_rawseti(L, 1, ++index);
-    return 0;
+	return 0;
 }
 
 // TODO: memory allocation limit
@@ -231,8 +232,25 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 	return 0;
 }
 
+static int httpCallback(lws *wsi, lws_callback_reasons reason, void *user, void *in, size_t len) {
+	switch (reason) {
+		case LWS_CALLBACK_HTTP: {
+			lws_serve_http_file(wsi, "index.html", "text/html", NULL, 0);
+			if (lws_http_transaction_completed(wsi)) {
+				return -1;
+			}
+			break;
+		}
+		default:
+			break;
+	}
+	
+	return 0;
+}
+
 static struct lws_protocols protocols[] = {
-	{ "ws-protocol", wsCallback, 0, WS_RX_BUFFER_BYTES },
+	{ "http", httpCallback, 0 },
+	{ "code", wsCallback, 0, WS_RX_BUFFER_BYTES },
 	{ NULL, NULL, 0, 0 },
 };
 
@@ -283,11 +301,11 @@ int openSerialPort(const char *name) {
 	return serialPort;
 }
 
-thread luaPeriodicThread([&](){
+thread luaPeriodicThread([](){
 	uint8_t result[LED_NUM];
 	lua_Integer delay = 1000;
 	lua_Integer counter = 1;
-	while (true) {
+	while (gRunning) {
 		if (gPeriodicReset) {
 			delay = gPeriodicReset;
 			counter = 1;
@@ -316,8 +334,20 @@ thread luaPeriodicThread([&](){
 	}
 });
 
-int main() {
-	gSerialPort = openSerialPort("/dev/ttyACM0");
+void exitProcess(int code) {
+	gRunning = false;
+	luaPeriodicThread.join();
+	exit(code);
+}
+
+int main(int argc, char *argv[]) {
+	if (argc != 3) {
+		printf("Syntax: luasand <COM port> <HTTP port>\n");
+		exitProcess(1);
+	}
+
+	int httpPort = atoi(argv[2]);
+	gSerialPort = openSerialPort(argv[1]);
 
 	L = luaL_newstate();
 	luaL_openlibs(L);
@@ -338,25 +368,25 @@ int main() {
 	lua_pushinteger(L, DELAY_FOREVER);
 	lua_setglobal(L, "DELAY_FOREVER");
 
-	if (luaL_dofile(L, "../init.lua") != LUA_OK) {
+	if (luaL_dofile(L, "init.lua") != LUA_OK) {
 		fprintf(stderr, "%s", lua_tostring(L, -1));
-		return 1;
+		exitProcess(2);
 	}
 
 	lws_context_creation_info info;
 	memset(&info, 0, sizeof(info));
-	info.port = 8000;
+	info.port = httpPort;
 	info.protocols = protocols;
 	info.gid = -1;
 	info.uid = -1;
 
 	struct lws_context *context = lws_create_context(&info);
 
-	while (1) {
+	while (gRunning) {
 		lws_service(context, 1000000);
 	}
 
 	lws_context_destroy(context);
 
-	return 0;
+	exitProcess(0);
 }
