@@ -232,46 +232,6 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 	return 0;
 }
 
-//unordered_map<__thread_id, int> gThreadIds;
-//mutex gThreadIdsMutex;
-//
-//static int httpCallback(lws *wsi, lws_callback_reasons reason, void *user, void *in, size_t len) {
-//	printf("httpCallback %d\n", (int)reason);
-//	switch (reason) {
-//		case LWS_CALLBACK_GET_THREAD_ID: {
-//			gThreadIdsMutex.lock();
-//			auto threadId = this_thread::get_id();
-//			if (gThreadIds.find(threadId) == gThreadIds.end()) {
-//				gThreadIds[threadId] = (int)gThreadIds.size();
-//			}
-//			auto result = gThreadIds[threadId];
-//			gThreadIdsMutex.unlock();
-//			return result;
-//		}
-//		case LWS_CALLBACK_HTTP: {
-//			lws_serve_http_file(wsi, "index.html", "text/html", NULL, 0);
-////			if (lws_http_transaction_completed(wsi)) {
-////				return -1;
-////			}
-//
-////			lws_callback_on_writable(wsi);
-//
-//			break;
-//		}
-////		case LWS_CALLBACK_HTTP_WRITEABLE: {
-////			lws_serve_http_file(wsi, "index.html", "text/html", NULL, 0);
-////			if (lws_http_transaction_completed(wsi)) {
-////				return -1;
-////			}
-////			break;
-////		}
-//		default:
-//			break;
-//	}
-//
-//	return lws_callback_http_dummy(wsi, reason, user, in, len);;
-//}
-
 static struct lws_protocols protocols[] = {
 	{ "http", lws_callback_http_dummy, 0 },
 	{ "code", wsCallback, 0, WS_RX_BUFFER_BYTES },
@@ -364,9 +324,9 @@ void exitProcess(int code) {
 	exit(code);
 }
 
-static const struct lws_http_mount mount = {
+static struct lws_http_mount mount = {
 		/* .mount_next */		NULL,		/* linked-list "next" */
-		/* .mountpoint */		"/",		/* mountpoint URL */
+		/* .mountpoint */		NULL,		/* mountpoint URL */
 		/* .origin */			"front",		/* serve from dir */
 		/* .def */			"index.html",	/* default filename */
 		/* .protocol */			NULL,
@@ -380,13 +340,13 @@ static const struct lws_http_mount mount = {
 		/* .cache_revalidate */		0,
 		/* .cache_intermediaries */	0,
 		/* .origin_protocol */		LWSMPRO_FILE,	/* files in a dir */
-		/* .mountpoint_len */		1,		/* char count */
+		/* .mountpoint_len */		0,		/* char count */
 		/* .basic_auth_login_file */	NULL,
 };
 
 int main(int argc, char *argv[]) {
-	if (argc != 3) {
-		printf("Syntax: luasand <COM port> <HTTP port>\n");
+	if (argc != 4) {
+		printf("Syntax: luasand <COM port> <HTTP port> <HTTP location>\n");
 		exitProcess(1);
 	}
 
@@ -424,6 +384,8 @@ int main(int argc, char *argv[]) {
 	memset(&info, 0, sizeof(info));
 	info.port = httpPort;
 	info.protocols = protocols;
+	mount.mountpoint = argv[3];
+	mount.mountpoint_len = strlen(argv[3]);
 	info.mounts = &mount;
 	info.gid = -1;
 	info.uid = -1;
