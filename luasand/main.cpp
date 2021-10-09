@@ -13,7 +13,7 @@ extern "C" {
 #include <chrono>
 
 #include <fcntl.h>
-#include <errno.h>
+#include <cerrno>
 #include <termios.h>
 #include <unistd.h>
 
@@ -65,12 +65,12 @@ struct ClientData {
 	}
 };
 
-unordered_map<lws*, ClientData> g_clientsData;
+unordered_map<lws*, ClientData> gClientsData;
 int gSerialPort = -1;
 mutex gLuaMutex;
 char gLuaCode[LUA_CODE_LEN + 1] = {0};
 volatile lua_Integer gPeriodicReset = 0;
-lua_State *L = nullptr;
+lua_State *gLuaState = nullptr;
 auto gStartTime = std::chrono::high_resolution_clock::now();
 volatile bool gRunning = true;
 
@@ -82,7 +82,7 @@ static int lua_timestamp(lua_State *L) {
 
 static int lua_addcolor(lua_State *L) {
 	auto color = lua_tointeger(L, 2);
-	auto len = lua_rawlen(L, 1);
+	auto len = (lua_Integer)lua_rawlen(L, 1);
 	lua_pushinteger(L, color >> 16);
 	lua_rawseti(L, 1, ++len);
 	lua_pushinteger(L, (color & 0xff00) >> 8);
@@ -105,33 +105,33 @@ static int lua_setcolor(lua_State *L) {
 }
 
 // TODO: memory allocation limit
-bool runLuaSandboxed(const char *code, int periodCounter, uint8_t result[LED_NUM], lua_Integer *delay, ClientData *client = nullptr) {
-	lua_getglobal(L, "run_sandboxed");
-	lua_pushstring(L, code);
-	lua_pushinteger(L, periodCounter);
-	lua_call(L, 2, 3);
-	bool success = (bool)lua_toboolean(L, -3);
+bool runLuaSandboxed(const char *code, lua_Integer periodCounter, uint8_t result[LED_NUM], lua_Integer *delay, ClientData *client = nullptr) {
+	lua_getglobal(gLuaState, "run_sandboxed");
+	lua_pushstring(gLuaState, code);
+	lua_pushinteger(gLuaState, periodCounter);
+	lua_call(gLuaState, 2, 3);
+	bool success = (bool)lua_toboolean(gLuaState, -3);
 	if (success) {
-		int len = (int)lua_rawlen(L, -2);
+		int len = (int)lua_rawlen(gLuaState, -2);
 		if (len == LED_NUM) {
 			for (int i = 1; i <= len; i++) {
-				lua_rawgeti(L, -2, i);
-				result[i - 1] = (uint8_t) lua_tointeger(L, -1);
-				lua_pop(L, 1);
+				lua_rawgeti(gLuaState, -2, i);
+				result[i - 1] = (uint8_t) lua_tointeger(gLuaState, -1);
+				lua_pop(gLuaState, 1);
 			}
-			*delay = (int)lua_tointeger(L, -1);
+			*delay = (int)lua_tointeger(gLuaState, -1);
 		} else {
 			success = false;
 		}
 	} else {
-		auto error = lua_tostring(L, -2);
+		auto error = lua_tostring(gLuaState, -2);
 		if (client != nullptr) {
 			client->print(error);
 		} else {
 			cout << error << endl;
 		}
 	}
-	lua_pop(L, 3);
+	lua_pop(gLuaState, 3);
 	return success;
 }
 
@@ -169,27 +169,27 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 	switch (reason) {
 		case LWS_CALLBACK_FILTER_NETWORK_CONNECTION: {
 			//lws_filter_network_conn_args *args = (lws_filter_network_conn_args*)user;
-			if (g_clientsData.size() > 8) { // TODO: configurable limit
+			if (gClientsData.size() > 8) { // TODO: configurable limit
 				return -1; // disconnect
 			}
 			break;
 		}
 
 		case LWS_CALLBACK_ESTABLISHED: {
-			g_clientsData[wsi].wsi = wsi;
-			g_clientsData[wsi].lwsContext = lws_get_context(wsi);
-			g_clientsData[wsi].lwsProtocol = lws_get_protocol(wsi);
+			gClientsData[wsi].wsi = wsi;
+			gClientsData[wsi].lwsContext = lws_get_context(wsi);
+			gClientsData[wsi].lwsProtocol = lws_get_protocol(wsi);
 			break;
 		}
 
 		case LWS_CALLBACK_CLOSED: {
-			g_clientsData.erase(wsi);
+			gClientsData.erase(wsi);
 			break;
 		}
 
 		case LWS_CALLBACK_RECEIVE: {
-			auto iClientData = g_clientsData.find(wsi);
-			if (iClientData == g_clientsData.end() || iClientData->second.wsi == NULL) {
+			auto iClientData = gClientsData.find(wsi);
+			if (iClientData == gClientsData.end() || iClientData->second.wsi == NULL) {
 				break;
 			}
 			if (wsDataReceived(iClientData->second, (char*)in, len, lws_is_final_fragment(wsi)) != 0) {
@@ -201,8 +201,8 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 		}
 
 		case LWS_CALLBACK_SERVER_WRITEABLE: {
-			auto iClientData = g_clientsData.find(wsi);
-			if (iClientData == g_clientsData.end()) {
+			auto iClientData = gClientsData.find(wsi);
+			if (iClientData == gClientsData.end()) {
 				break;
 			}
 			auto &clientData = iClientData->second;
@@ -232,24 +232,48 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 	return 0;
 }
 
-static int httpCallback(lws *wsi, lws_callback_reasons reason, void *user, void *in, size_t len) {
-	switch (reason) {
-		case LWS_CALLBACK_HTTP: {
-			lws_serve_http_file(wsi, "index.html", "text/html", NULL, 0);
-			if (lws_http_transaction_completed(wsi)) {
-				return -1;
-			}
-			break;
-		}
-		default:
-			break;
-	}
-	
-	return 0;
-}
+//unordered_map<__thread_id, int> gThreadIds;
+//mutex gThreadIdsMutex;
+//
+//static int httpCallback(lws *wsi, lws_callback_reasons reason, void *user, void *in, size_t len) {
+//	printf("httpCallback %d\n", (int)reason);
+//	switch (reason) {
+//		case LWS_CALLBACK_GET_THREAD_ID: {
+//			gThreadIdsMutex.lock();
+//			auto threadId = this_thread::get_id();
+//			if (gThreadIds.find(threadId) == gThreadIds.end()) {
+//				gThreadIds[threadId] = (int)gThreadIds.size();
+//			}
+//			auto result = gThreadIds[threadId];
+//			gThreadIdsMutex.unlock();
+//			return result;
+//		}
+//		case LWS_CALLBACK_HTTP: {
+//			lws_serve_http_file(wsi, "index.html", "text/html", NULL, 0);
+////			if (lws_http_transaction_completed(wsi)) {
+////				return -1;
+////			}
+//
+////			lws_callback_on_writable(wsi);
+//
+//			break;
+//		}
+////		case LWS_CALLBACK_HTTP_WRITEABLE: {
+////			lws_serve_http_file(wsi, "index.html", "text/html", NULL, 0);
+////			if (lws_http_transaction_completed(wsi)) {
+////				return -1;
+////			}
+////			break;
+////		}
+//		default:
+//			break;
+//	}
+//
+//	return lws_callback_http_dummy(wsi, reason, user, in, len);;
+//}
 
 static struct lws_protocols protocols[] = {
-	{ "http", httpCallback, 0 },
+	{ "http", lws_callback_http_dummy, 0 },
 	{ "code", wsCallback, 0, WS_RX_BUFFER_BYTES },
 	{ NULL, NULL, 0, 0 },
 };
@@ -340,6 +364,26 @@ void exitProcess(int code) {
 	exit(code);
 }
 
+static const struct lws_http_mount mount = {
+		/* .mount_next */		NULL,		/* linked-list "next" */
+		/* .mountpoint */		"/",		/* mountpoint URL */
+		/* .origin */			"front",		/* serve from dir */
+		/* .def */			"index.html",	/* default filename */
+		/* .protocol */			NULL,
+		/* .cgienv */			NULL,
+		/* .extra_mimetypes */		NULL,
+		/* .interpret */		NULL,
+		/* .cgi_timeout */		0,
+		/* .cache_max_age */		0,
+		/* .auth_mask */		0,
+		/* .cache_reusable */		0,
+		/* .cache_revalidate */		0,
+		/* .cache_intermediaries */	0,
+		/* .origin_protocol */		LWSMPRO_FILE,	/* files in a dir */
+		/* .mountpoint_len */		1,		/* char count */
+		/* .basic_auth_login_file */	NULL,
+};
+
 int main(int argc, char *argv[]) {
 	if (argc != 3) {
 		printf("Syntax: luasand <COM port> <HTTP port>\n");
@@ -348,28 +392,31 @@ int main(int argc, char *argv[]) {
 
 	int httpPort = atoi(argv[2]);
 	gSerialPort = openSerialPort(argv[1]);
+	if (gSerialPort < 0) {
+		exitProcess(1);
+	}
 
-	L = luaL_newstate();
-	luaL_openlibs(L);
+	gLuaState = luaL_newstate();
+	luaL_openlibs(gLuaState);
 
-	lua_pushcfunction(L, lua_timestamp);
-	lua_setglobal(L, "timestamp");
-	lua_pushcfunction(L, lua_addcolor);
-	lua_setglobal(L, "addcolor");
-	lua_pushcfunction(L, lua_setcolor);
-	lua_setglobal(L, "setcolor");
+	lua_pushcfunction(gLuaState, lua_timestamp);
+	lua_setglobal(gLuaState, "timestamp");
+	lua_pushcfunction(gLuaState, lua_addcolor);
+	lua_setglobal(gLuaState, "addcolor");
+	lua_pushcfunction(gLuaState, lua_setcolor);
+	lua_setglobal(gLuaState, "setcolor");
 
-	lua_pushinteger(L, PIX_NUM);
-	lua_setglobal(L, "PIX_NUM");
-	lua_pushinteger(L, DELAY_MIN);
-	lua_setglobal(L, "DELAY_MIN");
-	lua_pushinteger(L, DELAY_MAX);
-	lua_setglobal(L, "DELAY_MAX");
-	lua_pushinteger(L, DELAY_FOREVER);
-	lua_setglobal(L, "DELAY_FOREVER");
+	lua_pushinteger(gLuaState, PIX_NUM);
+	lua_setglobal(gLuaState, "PIX_NUM");
+	lua_pushinteger(gLuaState, DELAY_MIN);
+	lua_setglobal(gLuaState, "DELAY_MIN");
+	lua_pushinteger(gLuaState, DELAY_MAX);
+	lua_setglobal(gLuaState, "DELAY_MAX");
+	lua_pushinteger(gLuaState, DELAY_FOREVER);
+	lua_setglobal(gLuaState, "DELAY_FOREVER");
 
-	if (luaL_dofile(L, "init.lua") != LUA_OK) {
-		fprintf(stderr, "%s", lua_tostring(L, -1));
+	if (luaL_dofile(gLuaState, "init.lua") != LUA_OK) {
+		fprintf(stderr, "%s", lua_tostring(gLuaState, -1));
 		exitProcess(2);
 	}
 
@@ -377,6 +424,7 @@ int main(int argc, char *argv[]) {
 	memset(&info, 0, sizeof(info));
 	info.port = httpPort;
 	info.protocols = protocols;
+	info.mounts = &mount;
 	info.gid = -1;
 	info.uid = -1;
 

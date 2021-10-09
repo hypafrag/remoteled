@@ -388,7 +388,8 @@ return result, DELAY_MIN
 			}
 
 			function startWebsocket() {
-				window.ws = new WebSocket((location.protocol == 'https:' ? 'wss://' : 'ws://') + location.host, 'code');
+				window.ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') +
+					location.host + location.pathname, 'code');
 				ws.onmessage = function(message) {
 					console.log(message.data);
 				}
