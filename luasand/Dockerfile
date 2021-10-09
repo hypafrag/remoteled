@@ -1,13 +1,14 @@
 FROM alpine as builder
 
-WORKDIR /srv
 RUN apk add --no-cache cmake make g++ libwebsockets-dev lua5.3-dev openssl-dev
-COPY main.cpp CMakeLists.txt init.lua index.html ./
-RUN mkdir build && cd build && cmake .. && make
+ADD init.lua /srv
+ADD front /srv/front
+ADD main.cpp CMakeLists.txt ./
+RUN mkdir build && cd build && cmake .. && make && cp luasand /srv/luasand
 
 FROM alpine
 
 WORKDIR /srv
 RUN apk add --no-cache libwebsockets lua5.3 libstdc++
-COPY --from=builder /srv/init.lua /srv/index.html /srv/build/luasand ./
+COPY --from=builder /srv ./
 ENTRYPOINT ["/srv/luasand"]
