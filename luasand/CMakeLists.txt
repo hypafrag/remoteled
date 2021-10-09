@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD 14)
 
 set(SOURCE_FILES main.cpp)
 
-link_directories(/usr/lib/lua5.3)
+if (EXISTS /usr/lib/lua5.3)
+    link_directories(/usr/lib/lua5.3)
+endif()
 
 add_executable(luasand ${SOURCE_FILES})
 target_link_libraries(luasand lua ssl crypto websockets pthread)
