@@ -23,7 +23,7 @@ using namespace std;
 #define WS_RX_BUFFER_BYTES (LUA_CODE_LEN + 1)
 #define PIX_NUM 300
 #define LED_NUM (300 * 3)
-#define DELAY_MIN 40
+#define DELAY_MIN 20
 #define DELAY_MAX 999999999
 #define DELAY_FOREVER 1000000000
 
