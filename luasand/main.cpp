@@ -11,11 +11,16 @@ extern "C" {
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <vector>
+#include <string>
 
 #include <fcntl.h>
 #include <cerrno>
 #include <termios.h>
 #include <unistd.h>
+
+#include <sys/types.h>
+#include <dirent.h>
 
 using namespace std;
 
@@ -54,9 +59,9 @@ struct ClientData {
 		}
 		output[outputPos].length = strlen(str);
 		outputMutex.lock();
-		output[outputPos].string = (unsigned char*)malloc(LWS_SEND_BUFFER_PRE_PADDING +
-			output[outputPos].length + 1 + LWS_SEND_BUFFER_POST_PADDING);
-		memcpy(output[outputPos].string + LWS_SEND_BUFFER_PRE_PADDING, str,
+		output[outputPos].string = (unsigned char*)malloc(LWS_PRE +
+			output[outputPos].length + 1);
+		memcpy(output[outputPos].string + LWS_PRE, str,
 			output[outputPos].length + 1);
 		outputPos++;
 		outputMutex.unlock();
@@ -71,7 +76,7 @@ mutex gLuaMutex;
 char gLuaCode[LUA_CODE_LEN + 1] = {0};
 volatile lua_Integer gPeriodicReset = 0;
 lua_State *gLuaState = nullptr;
-auto gStartTime = std::chrono::high_resolution_clock::now();
+auto gStartTime = chrono::high_resolution_clock::now();
 volatile bool gRunning = true;
 
 static int lua_timestamp(lua_State *L) {
@@ -150,7 +155,7 @@ static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen
 		gLuaMutex.lock();
 		if (runLuaSandboxed(client.luaCodeBuffer, 0, result, &delay, &client)) {
 			write(gSerialPort, result, LED_NUM);
-			if (delay == std::numeric_limits<lua_Integer>::max()) {
+			if (delay == numeric_limits<lua_Integer>::max()) {
 				gLuaCode[0] = '\0';
 			} else {
 				memcpy(gLuaCode, client.luaCodeBuffer, client.luaCodeBufferSize + 1);
@@ -167,6 +172,7 @@ static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen
 static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *in, size_t len) {
 
 	switch (reason) {
+
 		case LWS_CALLBACK_FILTER_NETWORK_CONNECTION: {
 			//lws_filter_network_conn_args *args = (lws_filter_network_conn_args*)user;
 			if (gClientsData.size() > 8) { // TODO: configurable limit
@@ -232,8 +238,72 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 	return 0;
 }
 
+int testCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
+
+	switch (reason) {
+
+		case LWS_CALLBACK_HTTP: {
+			auto str = (char*)in;
+			uint8_t buf[LWS_PRE + 128], *start = &buf[LWS_PRE], *p = start,
+					*end = &buf[sizeof(buf) - 1];
+			if (lws_add_http_common_headers(wsi, HTTP_STATUS_OK, "text/plain",
+				LWS_ILLEGAL_HTTP_CONTENT_LEN, &p, end)) {
+				return 1;
+			}
+			if (lws_finalize_write_http_header(wsi, start, &p, end)) {
+				return 1;
+			}
+			lws_callback_on_writable(wsi);
+			break;
+		}
+
+		case LWS_CALLBACK_HTTP_WRITEABLE: {
+			size_t bodyLen = 0;
+			vector<string> examples;
+			auto dir = opendir("examples");
+			if (dir == NULL) {
+				return 1;
+			}
+			while (true) {
+				auto ep = readdir(dir);
+				if (ep == NULL) {
+					break;
+				}
+				auto nameLen = strlen(ep->d_name);
+				if (strcmp(ep->d_name + nameLen - 4, ".lua") != 0) {
+					continue;
+				}
+				bodyLen += nameLen + 1;
+				examples.emplace_back(ep->d_name);
+			}
+			sort(examples.begin(), examples.end());
+			closedir(dir);
+
+			unsigned char buffer[LWS_PRE + bodyLen], *body = buffer + LWS_PRE, *p = body;
+			for (auto &line: examples) {
+				memcpy(p, line.c_str(), line.length());
+				p += line.length();
+				*(p++) = '\n';
+			}
+			lws_write(wsi, body, bodyLen, LWS_WRITE_HTTP_FINAL);
+			if (lws_http_transaction_completed(wsi)) {
+				return -1;
+			}
+			break;
+		}
+
+		default: {
+			return lws_callback_http_dummy(wsi, reason, user, in, len);
+		}
+	}
+
+	return 0;
+}
+
+// TODO: set .per_session_data_size, use lws_context_user
 static struct lws_protocols protocols[] = {
-	{ "http", lws_callback_http_dummy, 0 },
+	{ "http", lws_callback_http_dummy, 0, 0 },
+	{ "test", testCallback, 0, 0 },
 	{ "code", wsCallback, 0, WS_RX_BUFFER_BYTES },
 	{ NULL, NULL, 0, 0 },
 };
@@ -298,7 +368,7 @@ thread luaPeriodicThread([](){
 			gLuaMutex.lock();
 			if (gLuaCode[0] != '\0' && runLuaSandboxed(gLuaCode, counter, result, &delay)) {
 				write(gSerialPort, result, LED_NUM);
-				if (counter == std::numeric_limits<lua_Integer>::max()) {
+				if (counter == numeric_limits<lua_Integer>::max()) {
 					counter = 0;
 				} else {
 					counter++;
@@ -324,8 +394,55 @@ void exitProcess(int code) {
 	exit(code);
 }
 
-static struct lws_http_mount mount = {
+static const struct lws_protocol_vhost_options extraMimes = {
+		NULL,				/* "next" linked-list */
+		NULL,				/* "child" linked-list */
+		".lua",				/* file suffix to match */
+		"text/plain"		/* mimetype to use */
+};
+
+static struct lws_http_mount examplesListMount = {
 		/* .mount_next */		NULL,		/* linked-list "next" */
+		/* .mountpoint */		NULL,		/* mountpoint URL */
+		/* .origin */			"test",		/* serve from dir */
+		/* .def */			NULL,	/* default filename */
+		/* .protocol */			NULL,
+		/* .cgienv */			NULL,
+		/* .extra_mimetypes */		&extraMimes,
+		/* .interpret */		NULL,
+		/* .cgi_timeout */		0,
+		/* .cache_max_age */		0,
+		/* .auth_mask */		0,
+		/* .cache_reusable */		0,
+		/* .cache_revalidate */		0,
+		/* .cache_intermediaries */	0,
+		/* .origin_protocol */		LWSMPRO_CALLBACK,	/* files in a dir */
+		/* .mountpoint_len */		0,		/* char count */
+		/* .basic_auth_login_file */	NULL,
+};
+
+static struct lws_http_mount examplesMount = {
+		/* .mount_next */		&examplesListMount,		/* linked-list "next" */
+		/* .mountpoint */		NULL,		/* mountpoint URL */
+		/* .origin */			"examples",		/* serve from dir */
+		/* .def */			NULL,	/* default filename */
+		/* .protocol */			NULL,
+		/* .cgienv */			NULL,
+		/* .extra_mimetypes */		&extraMimes,
+		/* .interpret */		NULL,
+		/* .cgi_timeout */		0,
+		/* .cache_max_age */		0,
+		/* .auth_mask */		0,
+		/* .cache_reusable */		0,
+		/* .cache_revalidate */		0,
+		/* .cache_intermediaries */	0,
+		/* .origin_protocol */		LWSMPRO_FILE,	/* files in a dir */
+		/* .mountpoint_len */		0,		/* char count */
+		/* .basic_auth_login_file */	NULL,
+};
+
+static struct lws_http_mount frontMount = {
+		/* .mount_next */		&examplesMount,		/* linked-list "next" */
 		/* .mountpoint */		NULL,		/* mountpoint URL */
 		/* .origin */			"front",		/* serve from dir */
 		/* .def */			"index.html",	/* default filename */
@@ -384,9 +501,19 @@ int main(int argc, char *argv[]) {
 	memset(&info, 0, sizeof(info));
 	info.port = httpPort;
 	info.protocols = protocols;
-	mount.mountpoint = argv[3];
-	mount.mountpoint_len = strlen(argv[3]);
-	info.mounts = &mount;
+
+	frontMount.mountpoint = argv[3];
+	frontMount.mountpoint_len = strlen(argv[3]);
+
+	auto examplesMountPoint = string(argv[3]) + "/examples";
+	examplesMount.mountpoint = examplesMountPoint.c_str();
+	examplesMount.mountpoint_len = examplesMountPoint.length();
+
+	auto examplesListMountPoint = examplesMountPoint + "/list";
+	examplesListMount.mountpoint = examplesListMountPoint.c_str();
+	examplesListMount.mountpoint_len = examplesListMountPoint.length();
+
+	info.mounts = &frontMount;
 	info.gid = -1;
 	info.uid = -1;
 

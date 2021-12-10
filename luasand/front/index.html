@@ -55,336 +55,36 @@
 				padding: 0;
 				margin: 1px;
 			}
+
+			body {
+				background-color: #272822;
+				color: #c8c8be;
+			}
+
+			button {
+				background-color: #272822;
+				color: #c8c8be;
+				border-color: #333;
+			}
+
+			textarea {
+				background-color: #272822;
+				color: #c8c8be;
+			}
+
+			hr {
+				background-color: #333;
+				border-color: #333;
+			}
 		</style>
 	</head>
 
 	<body>
 		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
 		<script>
-			let codeExamples = [
-
-`-- random flashing
-
-local result = {}
-
-for i = 1, PIX_NUM do
-	addcolor(result, math.random(0x000000, 0xffffff))
-end
-
-return result, 200
-`,
-
-`-- dim random flashing
-
-local result = {}
-
-for i = 1, PIX_NUM do
-	table.insert(result, math.random(0x00, 0x0f)) -- red
-	table.insert(result, math.random(0x00, 0x0f)) -- green
-	table.insert(result, math.random(0x00, 0x0f)) -- blue
-end
-
-return result, 200
-`,
-
-`-- turn off
-
-return RESULT_OFF, DELAY_FOREVER
-`,
-
-`-- running colors
-
-local result = {}
-local third = PIX_NUM / 3
-local rfocus = PERIOD_COUNTER % PIX_NUM
-local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
-local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
-
-local function color(focus, i)
-	local rdistance = math.abs(i - focus)
-	local ldistance = PIX_NUM - rdistance
-	return math.floor(255 / (math.min(rdistance, ldistance) + 1))
-end
-
-for i = 0, PIX_NUM - 1 do
-	table.insert(result, color(rfocus, i)) -- red
-	table.insert(result, color(gfocus, i)) -- green
-	table.insert(result, color(bfocus, i)) -- blue
-end
-
-return result, DELAY_MIN
-`,
-
-`-- running gaps
-
-local result = {}
-
-local gap = 2
-local step = -1  -- [-gap .. gap]
-local speed = 0.6 -- (0 .. 1.0]
-
-local offset = gap + 1
-local phase = (math.floor(PERIOD_COUNTER * speed) * (offset + step)) % offset
-
-for i = 1, PIX_NUM do
-	if i % offset == phase then
-		table.insert(result, math.random(0x00, 0x0f)) -- red
-		table.insert(result, math.random(0x00, 0x0f)) -- green
-		table.insert(result, math.random(0x00, 0x0f)) -- blue
-	else
-		addcolor(result, 0x000000)
-	end
-end
-
-return result, 100
-`,
-
-`-- fast running colors ping pong (hypnofrog)
-
-local result = {}
-local third = PIX_NUM / 3
-local phase = PERIOD_COUNTER * 16
-phase = phase % (PIX_NUM * 2)
-if phase > PIX_NUM then
-	phase = PIX_NUM - (phase - PIX_NUM)
-end
-local rfocus = phase % PIX_NUM
-local gfocus = (phase + third) % PIX_NUM
-local bfocus = (phase + third * 2) % PIX_NUM
-
-local function color(focus, i)
-	local rdistance = math.abs(i - focus)
-	local ldistance = PIX_NUM - rdistance
-	return math.floor(255 / (math.min(rdistance, ldistance) + 1))
-end
-
-for i = 0, PIX_NUM - 1 do
-	table.insert(result, color(rfocus, i)) -- red
-	table.insert(result, color(gfocus, i)) -- green
-	table.insert(result, color(bfocus, i)) -- blue
-end
-
-return result, DELAY_MIN
-`,
-
-`-- running colors 2 octaves
-
-local result = {}
-local third = PIX_NUM / 3
-local phase = PERIOD_COUNTER
-phase = phase % (PIX_NUM * 2)
-if phase > PIX_NUM then
-	phase = PIX_NUM - (phase - PIX_NUM)
-end
-local rfocus1 = phase % PIX_NUM
-local gfocus1 = (phase + third) % PIX_NUM
-local bfocus1 = (phase + third * 2) % PIX_NUM
-
-phase = PIX_NUM - phase
-
-local bfocus2 = phase % PIX_NUM
-local gfocus2 = (phase + third) % PIX_NUM
-local rfocus2 = (phase + third * 2) % PIX_NUM
-
-local function color(focus, i)
-	local rdistance = math.abs(i - focus)
-	local ldistance = PIX_NUM - rdistance
-	return math.floor(255 / (math.min(rdistance, ldistance) + 1))
-end
-
-local chunklen = 10
-local offset = PERIOD_COUNTER % (chunklen * 2) - chunklen
-
-for i = 0, PIX_NUM - 1 do
-	if (i + offset) % (chunklen * 2) > chunklen - 1 then
-		table.insert(result, color(rfocus1, i)) -- red
-		table.insert(result, color(gfocus1, i)) -- green
-		table.insert(result, color(bfocus1, i)) -- blue
-	else
-		table.insert(result, color(rfocus2, i)) -- red
-		table.insert(result, color(gfocus2, i)) -- green
-		table.insert(result, color(bfocus2, i)) -- blue
-	end
-end
-
-return result, DELAY_MIN
-`,
-
-`-- running colors and gaps 3 octaves
-
-local result = {}
-local third = PIX_NUM / 3
-
-local phase12 = PERIOD_COUNTER
-phase12 = phase12 % (PIX_NUM * 2)
-if phase12 > PIX_NUM then
-	phase12 = PIX_NUM - (phase12 - PIX_NUM)
-end
-local rfocus1 = phase12 % PIX_NUM
-local gfocus1 = (phase12 + third) % PIX_NUM
-local bfocus1 = (phase12 + third * 2) % PIX_NUM
-
-phase12 = PIX_NUM - phase12
-
-local bfocus2 = phase12 % PIX_NUM
-local gfocus2 = (phase12 + third) % PIX_NUM
-local rfocus2 = (phase12 + third * 2) % PIX_NUM
-
-local function color(focus, i)
-	local rdistance = math.abs(i - focus)
-	local ldistance = PIX_NUM - rdistance
-	return math.floor(255 / (math.min(rdistance, ldistance) + 1))
-end
-
-local chunklen2 = 10
-local offset2 = PERIOD_COUNTER % (chunklen2 * 2) - chunklen2
-
-local gap3 = 2
-local step3 = 1 -- [-gap3 .. gap3]
-local speed3 = 0.6 -- (0 .. 1.0]
-
-local offset3 = gap3 + 1
-local phase3 = (math.floor(PERIOD_COUNTER * speed3) * (offset3 + step3)) % offset3
-
-for i = 0, PIX_NUM - 1 do
-    if i % offset3 == phase3 then
-    	if (i + offset2) % (chunklen2 * 2) > chunklen2 - 1 then
-    		table.insert(result, color(rfocus1, i)) -- red
-    		table.insert(result, color(gfocus1, i)) -- green
-    		table.insert(result, color(bfocus1, i)) -- blue
-    	else
-    		table.insert(result, color(rfocus2, i)) -- red
-    		table.insert(result, color(gfocus2, i)) -- green
-    		table.insert(result, color(bfocus2, i)) -- blue
-    	end
-	else
-	    addcolor(result, 0x000000)
-    end
-end
-
-return result, DELAY_MIN
-`,
-
-`-- sonar scope
-
-local result = {}
-
-local offset = 54
-local lens = { 28, 25, 24, 23, 22, 20, 18, 17, 16, 15, 14, 13 }
-
-local rings = {}
-local posstart = offset
-for i = 1, #lens do
-	local posend = posstart + lens[i]
-	table.insert(rings, { posstart, posend })
-	posstart = posend + 1
-end
-
-local ringi = #rings - PERIOD_COUNTER % #rings
-local posstart, posend = table.unpack(rings[ringi])
-local pingled = 198
-local pingring = 5
-
-for i = 1, PIX_NUM do
-	if i == pingled then
-		local distance = #rings - ringi + pingring
-		if ringi <= pingring then
-			distance = distance - #rings
-		end
-		local f = 1.0 - distance / #rings
-		f = f * f
-		addcolor(result, 0x000100 * math.floor(f * 160))
-	elseif i >= posstart and i <= posend then
-		addcolor(result, 0x000800)
-	else
-		addcolor(result, 0x000000)
-	end
-end
-
-return result, 80
-`,
-
-`-- radar scope
-
-local result = {}
-for i = 1, PIX_NUM do
-	addcolor(result, 0x000000)
-end
-
-local offset = 54
-local lens = { 28, 25, 24, 23, 22, 20, 18, 17, 16, 15, 14, 13 }
-local angles = { 165.0, 140.0, 140.0, 135.0, 110.0, 90.0, 85.0, 85.0, 80.0, 70.0, 65.0, 45.0 }
-
-local rings = {}
-local posstart = offset
-for i = 1, #lens do
-	local posend = posstart + lens[i]
-	table.insert(rings, { posstart, posend })
-	posstart = posend + 1
-end
-
-local anglesteps = {}
-for i = 1, #lens do
-	table.insert(anglesteps, 360.0 / lens[i])
-end
-
-local threshold = 10.0
-local beamazimuth = (PERIOD_COUNTER * 10 + PERIOD_COUNTER / 360) % 360
-local pingazimuth = 130.0
-local pingduration = 200.0
-local pingindex = 198
-local pingintensity = 200.0
-
-if beamazimuth > pingazimuth and beamazimuth < pingazimuth + pingduration then
-	local f = 1.0 - (beamazimuth - pingazimuth) / pingduration
-	f = f * f
-	setcolor(result, pingindex, math.floor(f * pingintensity) * 0x100)
-end
-
-for i = 1, #angles do
-	local angle = angles[i]
-	local azimuth = beamazimuth
-	if angle > azimuth then
-		azimuth = azimuth + 360.0
-	end
-	local anglestep = anglesteps[i]
-	local posstart, posend = table.unpack(rings[i])
-
-	local mindiff = 1000.0
-	local selectedpos = 0
-
-	for j = posend, posstart, -1 do
-		local diff = math.abs(azimuth - angle)
-		if diff < mindiff then
-			mindiff = diff
-			selectedpos = j
-		end
-		angle = angle + anglestep
-	end
-
-	if mindiff < threshold then
-		local intensity = math.floor(((threshold - mindiff) / threshold) * 30)
-		result[(selectedpos - 1) * 3 + 2] = intensity;
-	end
-end
-
-return result, 40
-`
-			];
-		</script>
-		<script>
 			function copyToEditor(example) {
 				let p = document.getElementById(example);
 				codeArea.setValue(p.textContent, -1);
-			}
-
-			function copyToClipboard(example) {
-				let p = document.getElementById(example);
-				let range = document.createRange();
-				range.selectNode(p);
-				window.getSelection().removeAllRanges();
-				window.getSelection().addRange(range);
-				document.execCommand("copy");
 			}
 
 			function startWebsocket() {
@@ -394,11 +94,11 @@ return result, 40
 					console.log(message.data);
 				}
 				ws.onopen = function (event) {
-					var connectionIndicator = document.getElementById('connectionIndicator');
+					let connectionIndicator = document.getElementById('connectionIndicator');
 					connectionIndicator.style.backgroundColor = 'red';
 				};
 				ws.onclose = function () {
-					var connectionIndicator = document.getElementById('connectionIndicator');
+					let connectionIndicator = document.getElementById('connectionIndicator');
 					connectionIndicator.style.backgroundColor = 'gray';
 					setTimeout(function () {
 						startWebsocket()
@@ -408,7 +108,7 @@ return result, 40
 			startWebsocket()
 
 			function log_timestamp() {
-				var d = new Date();
+				let d = new Date();
 				return '' +
 					d.getDate().toString().padStart(2, '0') + '-' +
 					d.getMonth().toString().padStart(2, '0') + '-' +
@@ -420,10 +120,10 @@ return result, 40
 			}
 
 			document.addEventListener('DOMContentLoaded', function() {
-				var system_console_log = console.log;
-				var system_console_warn = console.error;
-				var system_console_error = console.error;
-				var logger = document.getElementById('log');
+				let system_console_log = console.log;
+				let system_console_warn = console.error;
+				let system_console_error = console.error;
+				let logger = document.getElementById('log');
 				try {
 					let code = localStorage.getItem('code');
 					if (code === null || code === "") {
@@ -453,6 +153,16 @@ return result, 40
 					system_console_error(message);
 				};
 
+				let xmlHttp = new XMLHttpRequest();
+				xmlHttp.open('GET', 'examples/list', false);
+				xmlHttp.send(null);
+				let codeExamples = xmlHttp.responseText.trimRight().split('\n').map((exampleName) => {
+					let xmlHttp = new XMLHttpRequest();
+					xmlHttp.open('GET', 'examples/' + exampleName, false);
+					xmlHttp.send(null);
+					return xmlHttp.responseText;
+				});
+
 				codeExamples.forEach((code, index) => {
 					let examplesArea = document.getElementById('examplesArea');
 					examplesArea.append(document.createElement('hr'));
@@ -463,12 +173,12 @@ return result, 40
 					examplesArea.append(codeP);
 
 					let copyToEditorButton = document.createElement('button');
-					copyToEditorButton.textContent = '\u{1f4cb}Copy to editor';
+					copyToEditorButton.textContent = '\u{1f4d1} Copy to editor';
 					copyToEditorButton.onclick = () => codeArea.setValue(code, -1);
 					examplesArea.append(copyToEditorButton);
 
 					let copyToClipboardButton = document.createElement('button');
-					copyToClipboardButton.textContent = '\u{1f4d1} Copy to clipboard';
+					copyToClipboardButton.textContent = '\u{1f4cb} Copy to clipboard';
 					copyToClipboardButton.onclick = () => navigator.clipboard.writeText(code);
 					examplesArea.append(copyToClipboardButton);
 
@@ -501,7 +211,7 @@ return result, 40
 		<script>
 			ace.config.set('basePath', 'https://pagecdn.io/lib/ace/1.4.12');
 			window.codeArea = ace.edit('codeArea');
-			// codeArea.setTheme('ace/theme/monokai');
+			codeArea.setTheme('ace/theme/monokai');
 			codeArea.session.setMode('ace/mode/lua');
 		</script>
 	</body>
