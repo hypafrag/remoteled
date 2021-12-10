@@ -13,13 +13,13 @@ extern "C" {
 #include <chrono>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 #include <fcntl.h>
 #include <cerrno>
 #include <termios.h>
 #include <unistd.h>
 
-#include <sys/types.h>
 #include <dirent.h>
 
 using namespace std;
