@@ -82,11 +82,6 @@
 	<body>
 		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
 		<script>
-			function copyToEditor(example) {
-				let p = document.getElementById(example);
-				codeArea.setValue(p.textContent, -1);
-			}
-
 			function startWebsocket() {
 				window.ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') +
 					location.host + location.pathname, 'code');
@@ -124,16 +119,6 @@
 				let system_console_warn = console.error;
 				let system_console_error = console.error;
 				let logger = document.getElementById('log');
-				try {
-					let code = localStorage.getItem('code');
-					if (code === null || code === "") {
-						copyToEditor('randomFlashingP')
-					} else {
-						codeArea.setValue(code, -1);
-					}
-				} catch (e) {
-
-				}
 				console.log = function (message) {
 					logger.value += 'I ' + log_timestamp() + ' ';
 					logger.value += message + '\n';
@@ -156,7 +141,7 @@
 				let xmlHttp = new XMLHttpRequest();
 				xmlHttp.open('GET', 'examples/list', false);
 				xmlHttp.send(null);
-				let codeExamples = xmlHttp.responseText.trimRight().split('\n').map((exampleName) => {
+				window.codeExamples = xmlHttp.responseText.trimRight().split('\n').map((exampleName) => {
 					let xmlHttp = new XMLHttpRequest();
 					xmlHttp.open('GET', 'examples/' + exampleName, false);
 					xmlHttp.send(null);
@@ -188,14 +173,27 @@
 					examplesArea.append(runButton);
 				});
 				examplesArea.append(document.createElement('hr'));
-			});
-			window.addEventListener('beforeunload', function(event) {
 				try {
-					localStorage.setItem('code', codeArea.getValue());
-				} catch(e) {
+					let code = localStorage.getItem('code');
+					if (code === null || code === "") {
+						codeArea.setValue(codeExamples[0], -1);
+					} else {
+						codeArea.setValue(code, -1);
+					}
+				} catch (e) {
 
 				}
 			});
+			let onClose = function(event) {
+				try {
+					let code = codeArea.getValue();
+					localStorage.setItem('code', code);
+				} catch(e) {
+
+				}
+			}
+			window.addEventListener('beforeunload', onClose);
+			window.addEventListener('pagehide', onClose);
 		</script>
 		<div id="codeArea" style="grid-area: a;"></div>
 		<div class="panel" style="grid-area: d;">
