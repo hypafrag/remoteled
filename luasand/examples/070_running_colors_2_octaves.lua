@@ -38,4 +38,4 @@ for i = 0, PIX_NUM - 1 do
 	end
 end
 
-return result, DELAY_MIN
+return result, 50
