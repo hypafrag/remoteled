@@ -368,7 +368,7 @@ thread luaPeriodicThread([](){
 			gLuaMutex.lock();
 			if (gLuaCode[0] != '\0' && runLuaSandboxed(gLuaCode, counter, result, &delay)) {
 				write(gSerialPort, result, LED_NUM);
-				if (counter == numeric_limits<lua_Integer>::max()) {
+				if (counter == 0xffffff) {
 					counter = 0;
 				} else {
 					counter++;
