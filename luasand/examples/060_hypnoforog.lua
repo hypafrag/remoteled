@@ -23,4 +23,4 @@ for i = 0, PIX_NUM - 1 do
 	table.insert(result, color(bfocus, i)) -- blue
 end
 
-return result, DELAY_MIN
+return result, 40
