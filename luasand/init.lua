@@ -18,15 +18,26 @@ RESULT_LEN = PIX_NUM * 3
 
 RESULT_OFF = {}
 
-for _=1, PIX_NUM do
+for _ = 1, PIX_NUM do
 	table.insert(RESULT_OFF, 0)
 	table.insert(RESULT_OFF, 0)
 	table.insert(RESULT_OFF, 0)
 end
 
+-- TODO: reimplement in c, make config for callibrations
+local function gammac(c, g, l, h)
+    return math.ceil(math.pow(c / 0xff.0, g) * (h - l) + l)
+end
+
+local function gamma(c, g)
+    return (gammac((c >> 16),       g, 0x00, 0x60) << 16) |
+           (gammac((c >> 8) & 0xff, g, 0x01, 0x60) << 8) |
+            gammac((c & 0xff),      g, 0x01, 0x60)
+end
+
 -- Safe packages/functions below
 ([[
-timestamp addcolor setcolor
+timestamp addcolor setcolor gamma
 RESULT_LEN RESULT_OFF PIX_NUM DELAY_MIN DELAY_MAX DELAY_FOREVER
 _VERSION assert error	ipairs   next pairs
 pcall	select tonumber tostring type xpcall
