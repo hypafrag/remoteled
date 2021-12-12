@@ -16,14 +16,6 @@ local BASE_ENV = {}
 
 RESULT_LEN = PIX_NUM * 3
 
-RESULT_OFF = {}
-
-for _ = 1, PIX_NUM do
-	table.insert(RESULT_OFF, 0)
-	table.insert(RESULT_OFF, 0)
-	table.insert(RESULT_OFF, 0)
-end
-
 -- TODO: reimplement in c, make config for callibrations
 local function gammac(c, g, l, h)
 	return math.ceil(math.pow(c / 0xff.0, g) * (h - l) + l)
@@ -39,7 +31,7 @@ end
 -- Safe packages/functions below
 ([[
 timestamp addcolor setcolor gamma
-RESULT_LEN RESULT_OFF PIX_NUM DELAY_MIN DELAY_MAX DELAY_FOREVER
+RESULT_LEN PIX_NUM DELAY_MIN DELAY_MAX DELAY_FOREVER
 _VERSION assert error	ipairs   next pairs
 pcall	select tonumber tostring type xpcall
 coroutine.create coroutine.resume coroutine.running coroutine.status
@@ -80,24 +72,42 @@ end)
 
 BASE_ENV_PROTECTED = protect_module(BASE_ENV, '_G')
 
-local function is_byte_array(t)
-	if type(t) ~= 'table' then
-		return false, 'Returned value is not a byte array'
-	end
-	local i = 0
-	for _ in pairs(t) do
-		i = i + 1
-		if t[i] == nil then
-			return false, 'Returned value is not a byte array. ' ..
-				string.format('Element %i is missing', i)
+local function to_frame_buffer(result)
+	if type(result) == 'number' then
+		if result < 0 or result > 0xffffff then
+			return nil, 'Number result should be in range [0x000000, 0xffffff]'
 		end
-		if not (t[i] >= 0 and t[i] <= 255) then
-			return false, 'Returned value is not a byte array. ' ..
-				string.format('Element %i is %s of type %s. Should be [0..255]',
-					i, tostring(t[i]), type(t[i]))
+		local r = result >> 16
+		local g = (result >> 8) & 0xff
+		local b = result & 0xff
+		result = {}
+		for _ = 1, PIX_NUM do
+			table.insert(result, r)
+			table.insert(result, g)
+			table.insert(result, b)
 		end
+		return result, nil
 	end
-	return true, nil
+	if type(result) == 'table' then
+		if #result ~= RESULT_LEN then
+			return nil, string.format('Result length should be %d bytes, actual is %d', RESULT_LEN, #result)
+		end
+		local i = 0
+		for _ in pairs(result) do
+			i = i + 1
+			if result[i] == nil then
+				return nil, 'Returned table is not a byte array. ' ..
+					string.format('Element %i is missing', i)
+			end
+			if not (result[i] >= 0 and result[i] <= 255) then
+				return nil, 'Returned table is not a byte array. ' ..
+					string.format('Element %i is %s of type %s. Should be [0..255]',
+						i, tostring(t[i]), type(result[i]))
+			end
+		end
+		return result, nil
+	end
+	return nil, 'Returned value is not a byte array'
 end
 
 function run_sandboxed(untrusted_code, period_counter)
@@ -108,19 +118,17 @@ function run_sandboxed(untrusted_code, period_counter)
 	end
 	local success, result, delay = pcall(untrusted_function)
 	if success then
-		delay = delay or DELAY_MIN
+		delay = delay or DELAY_FOREVER
 		if delay < DELAY_MIN then
 			return false, 'Delay shouldn\'t be less then ' .. DELAY_MIN, nil
 		end
 		if delay > DELAY_MAX and delay ~= DELAY_FOREVER then
 			return false, 'Delay shouldn\'t be more then ' .. DELAY_MAX, nil
 		end
-		local valid, message = is_byte_array(result)
-		if not valid then
+		local message
+		result, message = to_frame_buffer(result)
+		if result == nil then
 			return false, message, nil
-		end
-		if #result ~= RESULT_LEN then
-			return false, string.format('Result length should be %d bytes, actual is %d', RESULT_LEN, #result), nil
 		end
 	end
 	return success, result, delay

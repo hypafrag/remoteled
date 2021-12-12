@@ -1,0 +1,339 @@
+-- complex random flashing
+
+local result = {}
+
+local colors = {
+    -- 0x0000ff,
+    0x00007f,
+    0x007f00,
+    0x7f0000,
+}
+
+local GAMMA = 2.0
+local OFFSET_LEN = 0
+local CHUNK_LEN = 3
+local GAP_LEN = 1
+
+local function gamma(c, g)
+    return math.floor(math.pow(c / 0xff.0, g) * 0xff)
+end
+
+local function gamma3(c, g)
+    return
+        (gamma(c >> 16, g) << 16) |
+        (gamma((c >> 8) & 0xff, g) << 8) |
+        gamma(c & 0xff, g)
+end
+
+for i = 1, OFFSET_LEN do
+    addcolor(result, 0x000000)
+end
+
+for i = OFFSET_LEN + 1, PIX_NUM, CHUNK_LEN + GAP_LEN do
+    -- local color = gamma3(math.random(0x000000, 0xffffff) | 0x0f0f0f, GAMMA)
+    local color = gamma3(math.random(0x000000, 0xffffff), GAMMA)
+    -- local color = colors[math.random(1, #colors)]
+-- 	local r = gamma(math.random(0x00, 0x1f), GAMMA)
+-- 	local g = gamma(math.random(0x00, 0x1f), GAMMA)
+-- 	local b = gamma(math.random(0x00, 0x1f), GAMMA)
+-- 	local color = (r << 16) | (g << 8) | b
+    local chunkstart = i
+    local gapstart = chunkstart + CHUNK_LEN
+    local nextchunkstart = gapstart + GAP_LEN
+    for j = chunkstart, math.min(gapstart - 1, 300) do
+	    addcolor(result, color)
+	end
+    for j = gapstart, math.min(nextchunkstart - 1, 300) do
+	    addcolor(result, 0x000000)
+	end
+end
+
+return result, 100
+
+
+----
+
+-- pones
+
+local result = {}
+
+local GAMMA = 6
+local OFFSET_LEN = 0
+local CHUNK_LEN = 3
+local GAP_LEN = 1
+local MIN_COLOR = 0x0f0f0f
+-- local MAX_COLOR = 0x1f1f1f
+-- local MAX_COLOR = 0x3f3f3f
+-- local MAX_COLOR = 0x7f7f7f
+local MAX_COLOR = 0xffffff
+
+local function gamma(c, g)
+    return math.floor(math.pow(c / 0xff.0, g) * 0xff)
+end
+
+local function gamma3(c, g)
+    return
+        (gamma(c >> 16, g) << 16) |
+        (gamma((c >> 8) & 0xff, g) << 8) |
+        gamma(c & 0xff, g)
+end
+
+for i = 1, OFFSET_LEN do
+    addcolor(result, 0x000000)
+end
+
+for i = OFFSET_LEN + 1, PIX_NUM, CHUNK_LEN + GAP_LEN do
+    -- local color = 0xfdf6af -- fs yellow
+    local color = 0xf3b6cf -- fs pink
+    -- local color = 0x01a29d -- fs dark green
+    -- local color = 0x6ec9c7 -- fs green
+    
+    -- local color = 0x9edbf9 -- rd blue
+
+    -- local color = 0xc79dd7 -- ts light purple
+    -- local color = 0x363b74 -- ts blue
+    -- local color = 0xef4f91 -- ts pink
+
+    color = color | MIN_COLOR
+    color = color & MAX_COLOR
+    color = gamma3(color, GAMMA)
+    local chunkstart = i
+    local gapstart = chunkstart + CHUNK_LEN
+    local nextchunkstart = gapstart + GAP_LEN
+    for j = chunkstart, math.min(gapstart - 1, PIX_NUM) do
+	    addcolor(result, color)
+	end
+    for j = gapstart, math.min(nextchunkstart - 1, PIX_NUM) do
+	    addcolor(result, 0x000000)
+	end
+end
+
+return result, 200
+
+---
+
+-- vibrant random
+
+-- complex random flashing
+
+local result = {}
+
+local GAMMA = 6
+local OFFSET_LEN = 0
+local CHUNK_LEN = 4
+local GAP_LEN = 1
+local MIN_COLOR = 0x7f7f7f
+-- local MAX_COLOR = 0x1f1f1f
+-- local MAX_COLOR = 0x3f3f3f
+-- local MAX_COLOR = 0x7f7f7f
+local MAX_COLOR = 0xffffff
+local GAP_COLOR = 0x000000
+
+local function gamma(c, g)
+    return math.floor(math.pow(c / 0xff.0, g) * 0xff)
+end
+
+local function gamma3(c, g)
+    return
+        (gamma(c >> 16, g) << 16) |
+        (gamma((c >> 8) & 0xff, g) << 8) |
+        gamma(c & 0xff, g)
+end
+
+for i = 1, OFFSET_LEN do
+    addcolor(result, 0x000000)
+end
+
+for i = OFFSET_LEN + 1, PIX_NUM, CHUNK_LEN + GAP_LEN do
+    local color = math.random(0x000000, 0xffffff)
+    color = color | MIN_COLOR
+    color = color & MAX_COLOR
+    if color == MIN_COLOR then
+        color = MAX_COLOR
+    end
+    color = gamma3(color, GAMMA)
+    local chunkstart = i
+    local gapstart = chunkstart + CHUNK_LEN
+    local nextchunkstart = gapstart + GAP_LEN
+    for j = chunkstart, math.min(gapstart - 1, PIX_NUM) do
+	    addcolor(result, color)
+	end
+    for j = gapstart, math.min(nextchunkstart - 1, PIX_NUM) do
+	    addcolor(result, GAP_COLOR)
+	end
+end
+
+return result, 200
+
+---
+
+-- epilepsy
+
+local result = {}
+
+local GAMMA = 6
+local OFFSET_LEN = 0
+local CHUNK_LEN = 100
+local GAP_LEN = 0
+local MIN_COLOR = 0x7f7f7f
+-- local MAX_COLOR = 0x1f1f1f
+-- local MAX_COLOR = 0x3f3f3f
+-- local MAX_COLOR = 0x7f7f7f
+local MAX_COLOR = 0xffffff
+local GAP_COLOR = 0x000000
+
+local function gamma(c, g)
+    return math.floor(math.pow(c / 0xff.0, g) * 0xff)
+end
+
+local function gamma3(c, g)
+    return
+        (gamma(c >> 16, g) << 16) |
+        (gamma((c >> 8) & 0xff, g) << 8) |
+        gamma(c & 0xff, g)
+end
+
+for i = 1, OFFSET_LEN do
+    addcolor(result, 0x000000)
+end
+
+for i = OFFSET_LEN + 1, PIX_NUM, CHUNK_LEN + GAP_LEN do
+    local color = math.random(0x000000, 0xffffff)
+    color = color | MIN_COLOR
+    color = color & MAX_COLOR
+    if color == MIN_COLOR then
+        color = MAX_COLOR
+    end
+    color = gamma3(color, GAMMA)
+    local chunkstart = i
+    local gapstart = chunkstart + CHUNK_LEN
+    local nextchunkstart = gapstart + GAP_LEN
+    for j = chunkstart, math.min(gapstart - 1, PIX_NUM) do
+	    addcolor(result, color)
+	end
+    for j = gapstart, math.min(nextchunkstart - 1, PIX_NUM) do
+	    addcolor(result, GAP_COLOR)
+	end
+end
+
+return result, 20
+
+---
+
+-- gamma
+
+local result = {}
+
+local GAMMA = 6
+
+local function gamma(c, g, l, h)
+    return math.ceil(math.pow(c / 0xff.0, g) * (h - l) + l)
+    -- return math.ceil(math.pow(c / 0xff.0, g) * 0xff)
+end
+
+local function gamma3(c, g)
+    return (gamma((c >> 16),       g, 0x00, 0x60) << 16) |
+           (gamma((c >> 8) & 0xff, g, 0x01, 0x60) << 8) |
+            gamma((c & 0xff),      g, 0x01, 0x60)
+end
+
+for i = 1, PIX_NUM do
+    addcolor(result, gamma3(0xfdf6af, GAMMA)) -- fs yellow
+    -- addcolor(result, gamma3(0xf3b6cf, GAMMA)) -- fs pink
+    -- addcolor(result, gamma3(0x01a29d, GAMMA)) -- fs dark green
+    -- addcolor(result, gamma3(0x6ec9c7, GAMMA)) -- fs green
+
+    -- addcolor(result, gamma3(0x9edbf9, GAMMA)) -- rd blue
+
+    -- addcolor(result, gamma3(0xc79dd7, GAMMA)) -- ts light purple
+    -- addcolor(result, gamma3(0x363b74, GAMMA)) -- ts blue
+    -- addcolor(result, gamma3(0xef4f91, GAMMA)) -- ts pink
+
+
+    -- addcolor(result, gamma3(0x000000, GAMMA))
+    -- addcolor(result, gamma3(0x010101, GAMMA))
+    -- addcolor(result, gamma3(0xffffff, GAMMA))
+
+    -- addcolor(result, 0x020202)
+    -- addcolor(result, 0x606060)
+    -- addcolor(result, 0xffffff)
+end
+
+return result, DELAY_FOREVER
+
+---
+
+-- gamma
+
+local r = {}
+
+for _ = 1, PIX_NUM do
+    -- addcolor(r, gamma(0xfdf6af)) -- fs yellow
+    addcolor(r, gamma(0xf3b6cf)) -- fs pink
+    -- addcolor(r, gamma(0x01a29d)) -- fs dark green
+    -- addcolor(r, gamma(0x6ec9c7)) -- fs green
+
+    -- addcolor(r, gamma(0x9edbf9)) -- rd blue
+
+    -- addcolor(r, gamma(0xc79dd7)) -- ts light purple
+    -- addcolor(r, gamma(0x363b74)) -- ts blue
+    -- addcolor(r, gamma(0xef4f91)) -- ts pink
+
+    -- addcolor(r, gamma(0x000000))
+    -- addcolor(r, gamma(0x010101))
+    -- addcolor(r, gamma(0xffffff))
+
+    -- addcolor(r, 0x020202)
+    -- addcolor(r, 0x606060)
+    -- addcolor(r, 0xffffff)
+end
+
+return r, DELAY_FOREVER
+
+----
+
+-- running colors
+
+local result = {}
+local third = PIX_NUM / 3
+local rfocus = PERIOD_COUNTER % PIX_NUM
+local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
+local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
+
+local function color(focus, i)
+	local rdistance = math.abs(i - focus)
+	local ldistance = PIX_NUM - rdistance
+	return math.min(math.floor((6000) / (math.min(rdistance, ldistance) + 1)), 0xff)
+end
+
+for i = 0, PIX_NUM - 1 do
+    local c = color(rfocus, i) << 16 | color(gfocus, i) << 8 | color(bfocus, i)
+    addcolor(result, gamma(c))
+end
+
+return result, DELAY_MIN
+
+---
+
+-- running colors
+
+local result = {}
+local third = PIX_NUM / 3
+local rfocus = PERIOD_COUNTER % PIX_NUM
+local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
+local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
+local taillen = third / 2 + third / 4
+local intensity = 100
+
+local function color(focus, i)
+	local rdistance = math.abs(i - focus)
+	local ldistance = PIX_NUM - rdistance
+	return math.min(math.max(math.floor(taillen / math.min(rdistance, ldistance) * intensity), 0x00), 0xff)
+end
+
+for i = 0, PIX_NUM - 1 do
+    local c = color(rfocus, i) << 16 | color(gfocus, i) << 8 | color(bfocus, i)
+    addcolor(result, gamma(c))
+end
+
+return result, DELAY_MIN
