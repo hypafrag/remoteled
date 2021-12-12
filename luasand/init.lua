@@ -26,13 +26,14 @@ end
 
 -- TODO: reimplement in c, make config for callibrations
 local function gammac(c, g, l, h)
-    return math.ceil(math.pow(c / 0xff.0, g) * (h - l) + l)
+	return math.ceil(math.pow(c / 0xff.0, g) * (h - l) + l)
 end
 
-local function gamma(c, g)
-    return (gammac((c >> 16),       g, 0x00, 0x60) << 16) |
-           (gammac((c >> 8) & 0xff, g, 0x01, 0x60) << 8) |
-            gammac((c & 0xff),      g, 0x01, 0x60)
+function gamma(c, g)
+	g = g or 6.0
+	return	(gammac((c >> 16),       g, 0x00, 0x60) << 16) |
+			(gammac((c >> 8) & 0xff, g, 0x01, 0x60) << 8) |
+			 gammac((c & 0xff),      g, 0x01, 0x60)
 end
 
 -- Safe packages/functions below
