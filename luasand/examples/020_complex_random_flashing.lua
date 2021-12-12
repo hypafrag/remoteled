@@ -27,4 +27,4 @@ for i = OFFSET_LEN + 1, PIX_NUM, CHUNK_LEN + GAP_LEN do
 	end
 end
 
-return result, 200
+return result, 100
