@@ -461,6 +461,39 @@ static struct lws_http_mount frontMount = {
 		/* .basic_auth_login_file */	NULL,
 };
 
+struct luaAllocatorState_t {
+	size_t maxSize;
+	size_t used;
+};
+
+static void *luaAllocRestricted(void *ud, void *ptr, size_t osize, size_t nsize) {
+	auto state = (luaAllocatorState_t*)ud;
+	if (ptr == NULL) {
+		/*
+		 * <http://www.lua.org/manual/5.2/manual.html#lua_Alloc>:
+		 * When ptr is NULL, osize encodes the kind of object that Lua is
+		 * allocating.
+		 *
+		 * Since we don’t care about that, just mark it as 0.
+		 */
+		osize = 0;
+	}
+	if (nsize == 0) {
+		free(ptr);
+		state->used -= osize;
+		return NULL;
+	} else {
+		if (state->used + (nsize - osize) > state->maxSize) {
+			return NULL;
+		}
+		ptr = realloc(ptr, nsize);
+		if (ptr) {
+			state->used += nsize - osize;
+		}
+		return ptr;
+	}
+}
+
 int main(int argc, char *argv[]) {
 	if (argc != 4) {
 		printf("Syntax: luasand <COM port> <HTTP port> <HTTP location>\n");
@@ -473,7 +506,8 @@ int main(int argc, char *argv[]) {
 		exitProcess(1);
 	}
 
-	gLuaState = luaL_newstate();
+	luaAllocatorState_t ud = {1024 * 1024, 0};
+	gLuaState = lua_newstate(luaAllocRestricted, &ud);
 	luaL_openlibs(gLuaState);
 
 	lua_pushcfunction(gLuaState, lua_timestamp);
@@ -496,6 +530,8 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "%s", lua_tostring(gLuaState, -1));
 		exitProcess(2);
 	}
+
+	ud.maxSize = ud.used + 4 * 1024 * 1024;
 
 	lws_context_creation_info info;
 	memset(&info, 0, sizeof(info));
