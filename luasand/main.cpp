@@ -15,8 +15,9 @@ extern "C" {
 #include <string>
 #include <algorithm>
 
-#include <fcntl.h>
+#include <cstring>
 #include <cerrno>
+#include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -36,6 +37,7 @@ struct ClientData {
 	ClientData()
 		: wsi(nullptr)
 		, luaCodeBufferSize(0)
+		, luaCodeCodeBufferSize(0)
 		, outputPos(0)
 	{
 
@@ -46,6 +48,8 @@ struct ClientData {
 	const lws_protocols *lwsProtocol;
 	char luaCodeBuffer[LUA_CODE_LEN + 1];
 	size_t luaCodeBufferSize;
+	char luaByteCodeBuffer[LUA_CODE_LEN];
+	size_t luaCodeCodeBufferSize;
 	struct {
 		unsigned char *string;
 		size_t length;
@@ -74,6 +78,8 @@ unordered_map<lws*, ClientData> gClientsData;
 int gSerialPort = -1;
 mutex gLuaMutex;
 char gLuaCode[LUA_CODE_LEN + 1] = {0};
+char gLuaByteCode[LUA_CODE_LEN + 1] = {0};
+size_t gLuaByteCodeLen = 0;
 volatile lua_Integer gPeriodicReset = 0;
 lua_State *gLuaState = nullptr;
 auto gStartTime = chrono::high_resolution_clock::now();
@@ -109,12 +115,46 @@ static int lua_setcolor(lua_State *L) {
 	return 0;
 }
 
-// TODO: memory allocation limit
-bool runLuaSandboxed(const char *code, lua_Integer periodCounter, uint8_t result[LED_NUM], lua_Integer *delay, ClientData *client = nullptr) {
-	lua_getglobal(gLuaState, "run_sandboxed");
+bool compileLua(const char *code, char *bytecode, size_t *bytecodeSize) {
+	lua_getglobal(gLuaState, "load");
 	lua_pushstring(gLuaState, code);
+	lua_pushnil(gLuaState);
+	lua_pushstring(gLuaState, "t");
+	lua_call(gLuaState, 3, 2);
+	if (lua_isnil(gLuaState, -1)) {
+		lua_getglobal(gLuaState, "string");
+		lua_getfield(gLuaState, -1, "dump");
+		lua_pushvalue(gLuaState,-4);
+		lua_call(gLuaState, 1, 1);
+		auto bcSize = (size_t)lua_rawlen(gLuaState, -1);
+		if (bcSize > *bytecodeSize) {
+			::strcpy(bytecode, "Bytecode buffer is too small");
+			lua_pop(gLuaState, 4);
+			return false;
+		}
+		auto bc = lua_tolstring(gLuaState, -1, bytecodeSize);
+		memcpy(bytecode, bc, *bytecodeSize);
+		lua_pop(gLuaState, 4);
+		return true;
+	} else {
+		::strcpy(bytecode, lua_tostring(gLuaState, -1));
+		lua_pop(gLuaState, 2);
+		return false;
+	}
+}
+
+bool runLuaSandboxed(const char *byteCode,
+					 size_t bytecodeLen,
+					 lua_Integer periodCounter,
+					 uint8_t result[LED_NUM],
+					 lua_Integer *delay,
+					 ClientData *client = nullptr)
+{
+	lua_getglobal(gLuaState, "run_sandboxed");
+	lua_pushlstring(gLuaState, byteCode, bytecodeLen);
 	lua_pushinteger(gLuaState, periodCounter);
-	lua_call(gLuaState, 2, 3);
+	lua_pushstring(gLuaState, "b");
+	lua_call(gLuaState, 3, 3);
 	bool success = (bool)lua_toboolean(gLuaState, -3);
 	if (success) {
 		int len = (int)lua_rawlen(gLuaState, -2);
@@ -153,15 +193,20 @@ static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen
 		uint8_t result[LED_NUM];
 		lua_Integer delay;
 		gLuaMutex.lock();
-		if (runLuaSandboxed(client.luaCodeBuffer, 0, result, &delay, &client)) {
-			write(gSerialPort, result, LED_NUM);
-			if (delay == numeric_limits<lua_Integer>::max()) {
-				gLuaCode[0] = '\0';
-			} else {
+		client.luaCodeCodeBufferSize = sizeof(client.luaByteCodeBuffer);
+		if (compileLua(client.luaCodeBuffer, client.luaByteCodeBuffer, &client.luaCodeCodeBufferSize)) {
+			if (runLuaSandboxed(client.luaByteCodeBuffer, client.luaCodeCodeBufferSize, 0, result, &delay, &client)) {
+				write(gSerialPort, result, LED_NUM);
 				memcpy(gLuaCode, client.luaCodeBuffer, client.luaCodeBufferSize + 1);
+				if (delay >= DELAY_FOREVER) {
+					gLuaByteCodeLen = 0;
+				} else {
+					memcpy(gLuaByteCode, client.luaByteCodeBuffer, client.luaCodeCodeBufferSize);
+					gLuaByteCodeLen = client.luaCodeCodeBufferSize;
+				}
+				gPeriodicReset = delay;
+				client.print("Accepted");
 			}
-			gPeriodicReset = delay;
-			client.print("Accepted");
 		}
 		gLuaMutex.unlock();
 		client.luaCodeBufferSize = 0;
@@ -366,7 +411,7 @@ thread luaPeriodicThread([](){
 			gPeriodicReset = 0;
 		} else {
 			gLuaMutex.lock();
-			if (gLuaCode[0] != '\0' && runLuaSandboxed(gLuaCode, counter, result, &delay)) {
+			if (gLuaByteCodeLen != 0 && runLuaSandboxed(gLuaByteCode, gLuaByteCodeLen, counter, result, &delay)) {
 				write(gSerialPort, result, LED_NUM);
 				if (counter == 0xffffff) {
 					counter = 0;
@@ -374,7 +419,7 @@ thread luaPeriodicThread([](){
 					counter++;
 				}
 			} else {
-				gLuaCode[0] = '\0';
+				gLuaByteCodeLen = 0;
 			}
 			gLuaMutex.unlock();
 		}

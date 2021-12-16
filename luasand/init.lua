@@ -110,9 +110,9 @@ local function to_frame_buffer(result)
 	return nil, 'Returned value is not a byte array'
 end
 
-function run_sandboxed(untrusted_code, period_counter)
+function run_sandboxed(untrusted_code, period_counter, code_type)
 	BASE_ENV['PERIOD_COUNTER'] = period_counter
-	local untrusted_function, message = load(untrusted_code, nil, 't', BASE_ENV_PROTECTED)
+	local untrusted_function, message = load(untrusted_code, nil, code_type, BASE_ENV_PROTECTED)
 	if not untrusted_function then
 		return false, message, nil
 	end
