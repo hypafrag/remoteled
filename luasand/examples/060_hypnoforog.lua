@@ -1,9 +1,9 @@
 -- fast running colors ping pong (hypnofrog)
 
-local PERIOD_COUNTER = STATE or 0
 local result = {}
+local pc = STATE or 0
 local third = PIX_NUM / 3
-local phase = PERIOD_COUNTER * 16
+local phase = pc * 16
 phase = phase % (PIX_NUM * 2)
 if phase > PIX_NUM then
 	phase = PIX_NUM - (phase - PIX_NUM)
@@ -24,5 +24,4 @@ for i = 0, PIX_NUM - 1 do
 	table.insert(result, color(bfocus, i)) -- blue
 end
 
-PERIOD_COUNTER = PERIOD_COUNTER + 1
-return result, 40, PERIOD_COUNTER
+return result, 40, pc + 1

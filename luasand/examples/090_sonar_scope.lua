@@ -1,7 +1,7 @@
 -- sonar scope
 
-local PERIOD_COUNTER = STATE or 0
 local result = {}
+local pc = STATE or 0
 
 local offset = 54
 local lens = { 28, 25, 24, 23, 22, 20, 18, 17, 16, 15, 14, 13 }
@@ -14,7 +14,7 @@ for i = 1, #lens do
 	posstart = posend + 1
 end
 
-local ringi = #rings - PERIOD_COUNTER % #rings
+local ringi = #rings - pc % #rings
 local posstart, posend = table.unpack(rings[ringi])
 local pingled = 198
 local pingring = 5
@@ -35,5 +35,4 @@ for i = 1, PIX_NUM do
 	end
 end
 
-PERIOD_COUNTER = PERIOD_COUNTER + 1
-return result, 80, PERIOD_COUNTER
+return result, 80, pc + 1

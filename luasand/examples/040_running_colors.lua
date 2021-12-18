@@ -1,11 +1,11 @@
 -- running colors
 
-local PERIOD_COUNTER = STATE or 0
 local result = {}
+local pc = STATE or 0
 local third = PIX_NUM / 3
-local rfocus = PERIOD_COUNTER % PIX_NUM
-local gfocus = (PERIOD_COUNTER + third) % PIX_NUM
-local bfocus = (PERIOD_COUNTER + third * 2) % PIX_NUM
+local rfocus = pc % PIX_NUM
+local gfocus = (pc + third) % PIX_NUM
+local bfocus = (pc + third * 2) % PIX_NUM
 
 local function color(focus, i)
 	local rdistance = math.abs(i - focus)
@@ -19,5 +19,4 @@ for i = 0, PIX_NUM - 1 do
 	table.insert(result, color(bfocus, i)) -- blue
 end
 
-PERIOD_COUNTER = PERIOD_COUNTER + 1
-return result, DELAY_MIN, PERIOD_COUNTER
+return result, DELAY_MIN, pc + 1

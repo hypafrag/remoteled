@@ -1,9 +1,9 @@
 -- running colors 2 octaves
 
-local PERIOD_COUNTER = STATE or 0
 local result = {}
+local pc = STATE or 0
 local third = PIX_NUM / 3
-local phase = PERIOD_COUNTER
+local phase = pc
 phase = phase % (PIX_NUM * 2)
 if phase > PIX_NUM then
 	phase = PIX_NUM - (phase - PIX_NUM)
@@ -25,7 +25,7 @@ local function color(focus, i)
 end
 
 local chunklen = 10
-local offset = PERIOD_COUNTER % (chunklen * 2) - chunklen
+local offset = pc % (chunklen * 2) - chunklen
 
 for i = 0, PIX_NUM - 1 do
 	if (i + offset) % (chunklen * 2) > chunklen - 1 then
@@ -39,5 +39,4 @@ for i = 0, PIX_NUM - 1 do
 	end
 end
 
-PERIOD_COUNTER = PERIOD_COUNTER + 1
-return result, 50, PERIOD_COUNTER
+return result, 50, pc + 1
