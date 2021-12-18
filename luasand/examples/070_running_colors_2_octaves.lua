@@ -1,5 +1,6 @@
 -- running colors 2 octaves
 
+local PERIOD_COUNTER = STATE or 0
 local result = {}
 local third = PIX_NUM / 3
 local phase = PERIOD_COUNTER
@@ -38,4 +39,5 @@ for i = 0, PIX_NUM - 1 do
 	end
 end
 
-return result, 50
+PERIOD_COUNTER = PERIOD_COUNTER + 1
+return result, 50, PERIOD_COUNTER

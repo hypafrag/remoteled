@@ -16,7 +16,7 @@ local BASE_ENV = {}
 
 RESULT_LEN = PIX_NUM * 3
 
--- TODO: reimplement in c, make config for callibrations
+-- TODO: reimplement in c, make config for calibrations
 local function gammac(c, g, l, h)
 	return math.ceil(math.pow(c / 0xff.0, g) * (h - l) + l)
 end
@@ -110,28 +110,30 @@ local function to_frame_buffer(result)
 	return nil, 'Returned value is not a byte array'
 end
 
-function run_sandboxed(untrusted_code, period_counter, code_type)
-	BASE_ENV['PERIOD_COUNTER'] = period_counter
+function run_sandboxed(untrusted_code, code_type, state)
+	BASE_ENV['STATE'] = state
 	local untrusted_function, message = load(untrusted_code, nil, code_type, BASE_ENV_PROTECTED)
 	if not untrusted_function then
-		return false, message, nil
+		return false, message, nil, nil
 	end
-	local success, result, delay = pcall(untrusted_function)
+	local success, result, delay, state = pcall(untrusted_function)
+	BASE_ENV['STATE'] = nil
+	collectgarbage("collect")
 	if success then
 		delay = delay or DELAY_FOREVER
 		if delay < DELAY_MIN then
-			return false, 'Delay shouldn\'t be less then ' .. DELAY_MIN, nil
+			return false, 'Delay shouldn\'t be less then ' .. DELAY_MIN, nil, nil
 		end
 		if delay > DELAY_MAX and delay ~= DELAY_FOREVER then
-			return false, 'Delay shouldn\'t be more then ' .. DELAY_MAX, nil
+			return false, 'Delay shouldn\'t be more then ' .. DELAY_MAX, nil, nil
 		end
 		local message
 		result, message = to_frame_buffer(result)
 		if result == nil then
-			return false, message, nil
+			return false, message, nil, nil
 		end
 	end
-	return success, result, delay
+	return success, result, delay, state
 end
 
 print('Sandbox loaded')

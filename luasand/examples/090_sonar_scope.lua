@@ -1,5 +1,6 @@
 -- sonar scope
 
+local PERIOD_COUNTER = STATE or 0
 local result = {}
 
 local offset = 54
@@ -34,4 +35,5 @@ for i = 1, PIX_NUM do
 	end
 end
 
-return result, 80
+PERIOD_COUNTER = PERIOD_COUNTER + 1
+return result, 80, PERIOD_COUNTER

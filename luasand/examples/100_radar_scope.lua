@@ -1,5 +1,6 @@
 -- radar scope
 
+local PERIOD_COUNTER = STATE or 0
 local result = {}
 for i = 1, PIX_NUM do
 	addcolor(result, 0x000000)
@@ -62,4 +63,5 @@ for i = 1, #angles do
 	end
 end
 
-return result, 40
+PERIOD_COUNTER = PERIOD_COUNTER + 1
+return result, 40, PERIOD_COUNTER

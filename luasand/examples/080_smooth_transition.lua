@@ -1,5 +1,6 @@
 -- smooth transitions
 
+local PERIOD_COUNTER = STATE or 0
 local base = 0
 local pc = PERIOD_COUNTER * 10
 local singlecycle = 255
@@ -13,4 +14,5 @@ local r = math.max(singlecycle - math.abs(singlecycle - rphase), base)
 local g = math.max(singlecycle - math.abs(singlecycle - gphase), base)
 local b = math.max(singlecycle - math.abs(singlecycle - bphase), base)
 
-return r << 16 | g << 8 | b, 60
+PERIOD_COUNTER = PERIOD_COUNTER + 1
+return r << 16 | g << 8 | b, 60, PERIOD_COUNTER

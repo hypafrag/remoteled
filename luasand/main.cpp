@@ -145,26 +145,32 @@ bool compileLua(const char *code, char *bytecode, size_t *bytecodeSize) {
 
 bool runLuaSandboxed(const char *byteCode,
 					 size_t bytecodeLen,
-					 lua_Integer periodCounter,
 					 uint8_t result[LED_NUM],
 					 lua_Integer *delay,
+					 bool nilState,
 					 ClientData *client = nullptr)
 {
 	lua_getglobal(gLuaState, "run_sandboxed");
 	lua_pushlstring(gLuaState, byteCode, bytecodeLen);
-	lua_pushinteger(gLuaState, periodCounter);
 	lua_pushstring(gLuaState, "b");
-	lua_call(gLuaState, 3, 3);
-	bool success = (bool)lua_toboolean(gLuaState, -3);
+	if (nilState) {
+		lua_pushnil(gLuaState);
+	} else {
+		lua_getglobal(gLuaState, "STATE");
+	}
+	lua_call(gLuaState, 3, 4);
+	bool success = (bool)lua_toboolean(gLuaState, -4);
 	if (success) {
-		int len = (int)lua_rawlen(gLuaState, -2);
+		int len = (int)lua_rawlen(gLuaState, -3);
 		if (len == LED_NUM) {
 			for (int i = 1; i <= len; i++) {
-				lua_rawgeti(gLuaState, -2, i);
+				lua_rawgeti(gLuaState, -3, i);
 				result[i - 1] = (uint8_t) lua_tointeger(gLuaState, -1);
 				lua_pop(gLuaState, 1);
 			}
-			*delay = (int)lua_tointeger(gLuaState, -1);
+			*delay = (int)lua_tointeger(gLuaState, -2);
+			lua_pushvalue(gLuaState, -1);
+			lua_setglobal(gLuaState, "STATE");
 		} else {
 			success = false;
 		}
@@ -176,7 +182,7 @@ bool runLuaSandboxed(const char *byteCode,
 			cout << error << endl;
 		}
 	}
-	lua_pop(gLuaState, 3);
+	lua_pop(gLuaState, 4);
 	return success;
 }
 
@@ -195,7 +201,7 @@ static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen
 		gLuaMutex.lock();
 		client.luaCodeCodeBufferSize = sizeof(client.luaByteCodeBuffer);
 		if (compileLua(client.luaCodeBuffer, client.luaByteCodeBuffer, &client.luaCodeCodeBufferSize)) {
-			if (runLuaSandboxed(client.luaByteCodeBuffer, client.luaCodeCodeBufferSize, 0, result, &delay, &client)) {
+			if (runLuaSandboxed(client.luaByteCodeBuffer, client.luaCodeCodeBufferSize, result, &delay, true, &client)) {
 				write(gSerialPort, result, LED_NUM);
 				memcpy(gLuaCode, client.luaCodeBuffer, client.luaCodeBufferSize + 1);
 				if (delay >= DELAY_FOREVER) {
@@ -288,7 +294,6 @@ int testCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
 	switch (reason) {
 
 		case LWS_CALLBACK_HTTP: {
-			auto str = (char*)in;
 			uint8_t buf[LWS_PRE + 128], *start = &buf[LWS_PRE], *p = start,
 					*end = &buf[sizeof(buf) - 1];
 			if (lws_add_http_common_headers(wsi, HTTP_STATUS_OK, "text/plain",
@@ -403,21 +408,14 @@ int openSerialPort(const char *name) {
 thread luaPeriodicThread([](){
 	uint8_t result[LED_NUM];
 	lua_Integer delay = 1000;
-	lua_Integer counter = 1;
 	while (gRunning) {
 		if (gPeriodicReset) {
 			delay = gPeriodicReset;
-			counter = 1;
 			gPeriodicReset = 0;
 		} else {
 			gLuaMutex.lock();
-			if (gLuaByteCodeLen != 0 && runLuaSandboxed(gLuaByteCode, gLuaByteCodeLen, counter, result, &delay)) {
+			if (gLuaByteCodeLen != 0 && runLuaSandboxed(gLuaByteCode, gLuaByteCodeLen, result, &delay, false)) {
 				write(gSerialPort, result, LED_NUM);
-				if (counter == 0xffffff) {
-					counter = 0;
-				} else {
-					counter++;
-				}
 			} else {
 				gLuaByteCodeLen = 0;
 			}
@@ -570,6 +568,8 @@ int main(int argc, char *argv[]) {
 	lua_setglobal(gLuaState, "DELAY_MAX");
 	lua_pushinteger(gLuaState, DELAY_FOREVER);
 	lua_setglobal(gLuaState, "DELAY_FOREVER");
+	lua_pushnil(gLuaState);
+	lua_setglobal(gLuaState, "STATE");
 
 	if (luaL_dofile(gLuaState, "init.lua") != LUA_OK) {
 		fprintf(stderr, "%s", lua_tostring(gLuaState, -1));
