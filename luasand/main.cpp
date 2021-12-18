@@ -78,6 +78,7 @@ unordered_map<lws*, ClientData> gClientsData;
 int gSerialPort = -1;
 mutex gLuaMutex;
 char gLuaCode[LUA_CODE_LEN + 1] = {0};
+size_t gLuaCodeLen = 0;
 char gLuaByteCode[LUA_CODE_LEN + 1] = {0};
 size_t gLuaByteCodeLen = 0;
 volatile lua_Integer gPeriodicReset = 0;
@@ -204,6 +205,7 @@ static int wsDataReceived(ClientData &client, const char *chunk, size_t chunkLen
 			if (runLuaSandboxed(client.luaByteCodeBuffer, client.luaCodeCodeBufferSize, result, &delay, true, &client)) {
 				write(gSerialPort, result, LED_NUM);
 				memcpy(gLuaCode, client.luaCodeBuffer, client.luaCodeBufferSize + 1);
+				gLuaCodeLen = client.luaCodeBufferSize;
 				if (delay >= DELAY_FOREVER) {
 					gLuaByteCodeLen = 0;
 				} else {
@@ -289,22 +291,25 @@ static int wsCallback(lws *wsi, lws_callback_reasons reason, void *user, void *i
 	return 0;
 }
 
-int testCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
+static int startTextResponse(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
+	uint8_t buf[LWS_PRE + 128], *start = &buf[LWS_PRE], *p = start,
+			*end = &buf[sizeof(buf) - 1];
+	if (lws_add_http_common_headers(wsi, HTTP_STATUS_OK, "text/plain",
+									LWS_ILLEGAL_HTTP_CONTENT_LEN, &p, end)) {
+		return 1;
+	}
+	if (lws_finalize_write_http_header(wsi, start, &p, end)) {
+		return 1;
+	}
+	lws_callback_on_writable(wsi);
+	return 0;
+}
+
+static int examplesListCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
 
 	switch (reason) {
-
 		case LWS_CALLBACK_HTTP: {
-			uint8_t buf[LWS_PRE + 128], *start = &buf[LWS_PRE], *p = start,
-					*end = &buf[sizeof(buf) - 1];
-			if (lws_add_http_common_headers(wsi, HTTP_STATUS_OK, "text/plain",
-				LWS_ILLEGAL_HTTP_CONTENT_LEN, &p, end)) {
-				return 1;
-			}
-			if (lws_finalize_write_http_header(wsi, start, &p, end)) {
-				return 1;
-			}
-			lws_callback_on_writable(wsi);
-			break;
+			return startTextResponse(wsi, reason, user, in, len);
 		}
 
 		case LWS_CALLBACK_HTTP_WRITEABLE: {
@@ -346,14 +351,38 @@ int testCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, 
 			return lws_callback_http_dummy(wsi, reason, user, in, len);
 		}
 	}
+	return 0;
+}
 
+static int runningCodeCallback(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
+
+	switch (reason) {
+		case LWS_CALLBACK_HTTP: {
+			return startTextResponse(wsi, reason, user, in, len);
+		}
+
+		case LWS_CALLBACK_HTTP_WRITEABLE: {
+			unsigned char buffer[LWS_PRE + gLuaCodeLen];
+			memcpy(buffer + LWS_PRE, gLuaCode, gLuaCodeLen);
+			lws_write(wsi, buffer + LWS_PRE, gLuaCodeLen, LWS_WRITE_HTTP_FINAL);
+			if (lws_http_transaction_completed(wsi)) {
+				return -1;
+			}
+			break;
+		}
+
+		default: {
+			return lws_callback_http_dummy(wsi, reason, user, in, len);
+		}
+	}
 	return 0;
 }
 
 // TODO: set .per_session_data_size, use lws_context_user
 static struct lws_protocols protocols[] = {
 	{ "http", lws_callback_http_dummy, 0, 0 },
-	{ "test", testCallback, 0, 0 },
+	{ "examplesList", examplesListCallback, 0, 0 },
+	{ "runningCode", runningCodeCallback, 0, 0 },
 	{ "code", wsCallback, 0, WS_RX_BUFFER_BYTES },
 	{ NULL, NULL, 0, 0 },
 };
@@ -438,70 +467,90 @@ void exitProcess(int code) {
 }
 
 static const struct lws_protocol_vhost_options extraMimes = {
-		NULL,				/* "next" linked-list */
-		NULL,				/* "child" linked-list */
-		".lua",				/* file suffix to match */
-		"text/plain"		/* mimetype to use */
+	NULL, // "next" linked-list
+	NULL, // "child" linked-list
+	".lua", // file suffix to match
+	"text/plain" // mimetype to use
 };
 
 static struct lws_http_mount examplesListMount = {
-		/* .mount_next */		NULL,		/* linked-list "next" */
-		/* .mountpoint */		NULL,		/* mountpoint URL */
-		/* .origin */			"test",		/* serve from dir */
-		/* .def */			NULL,	/* default filename */
-		/* .protocol */			NULL,
-		/* .cgienv */			NULL,
-		/* .extra_mimetypes */		&extraMimes,
-		/* .interpret */		NULL,
-		/* .cgi_timeout */		0,
-		/* .cache_max_age */		0,
-		/* .auth_mask */		0,
-		/* .cache_reusable */		0,
-		/* .cache_revalidate */		0,
-		/* .cache_intermediaries */	0,
-		/* .origin_protocol */		LWSMPRO_CALLBACK,	/* files in a dir */
-		/* .mountpoint_len */		0,		/* char count */
-		/* .basic_auth_login_file */	NULL,
+	/* .mount_next */				NULL, // linked-list "next"
+	/* .mountpoint */				NULL, // mountpoint URL
+	/* .origin */					"examplesList", // rest protocol callback
+	/* .def */						NULL, // default filename
+	/* .protocol */					NULL,
+	/* .cgienv */					NULL,
+	/* .extra_mimetypes */			NULL,
+	/* .interpret */				NULL,
+	/* .cgi_timeout */				0,
+	/* .cache_max_age */			0,
+	/* .auth_mask */				0,
+	/* .cache_reusable */			0,
+	/* .cache_revalidate */			0,
+	/* .cache_intermediaries */		0,
+	/* .origin_protocol */			LWSMPRO_CALLBACK, // use rest protocol callback
+	/* .mountpoint_len */			0, // char count
+	/* .basic_auth_login_file */	NULL,
+};
+
+static struct lws_http_mount runningCodeMount = {
+	/* .mount_next */				&examplesListMount, // linked-list "next"
+	/* .mountpoint */				NULL, // mountpoint URL
+	/* .origin */					"runningCode", // rest protocol callback
+	/* .def */						NULL, // default filename
+	/* .protocol */					NULL,
+	/* .cgienv */					NULL,
+	/* .extra_mimetypes */			NULL,
+	/* .interpret */				NULL,
+	/* .cgi_timeout */				0,
+	/* .cache_max_age */			0,
+	/* .auth_mask */				0,
+	/* .cache_reusable */			0,
+	/* .cache_revalidate */			0,
+	/* .cache_intermediaries */		0,
+	/* .origin_protocol */			LWSMPRO_CALLBACK, // use rest protocol callback
+	/* .mountpoint_len */			0, // char count
+	/* .basic_auth_login_file */	NULL,
 };
 
 static struct lws_http_mount examplesMount = {
-		/* .mount_next */		&examplesListMount,		/* linked-list "next" */
-		/* .mountpoint */		NULL,		/* mountpoint URL */
-		/* .origin */			"examples",		/* serve from dir */
-		/* .def */			NULL,	/* default filename */
-		/* .protocol */			NULL,
-		/* .cgienv */			NULL,
-		/* .extra_mimetypes */		&extraMimes,
-		/* .interpret */		NULL,
-		/* .cgi_timeout */		0,
-		/* .cache_max_age */		0,
-		/* .auth_mask */		0,
-		/* .cache_reusable */		0,
-		/* .cache_revalidate */		0,
-		/* .cache_intermediaries */	0,
-		/* .origin_protocol */		LWSMPRO_FILE,	/* files in a dir */
-		/* .mountpoint_len */		0,		/* char count */
-		/* .basic_auth_login_file */	NULL,
+	/* .mount_next */				&runningCodeMount, // linked-list "next"
+	/* .mountpoint */				NULL, // mountpoint URL
+	/* .origin */					"examples", // serve from dir
+	/* .def */						NULL, // default filename
+	/* .protocol */					NULL,
+	/* .cgienv */					NULL,
+	/* .extra_mimetypes */			&extraMimes,
+	/* .interpret */				NULL,
+	/* .cgi_timeout */				0,
+	/* .cache_max_age */			0,
+	/* .auth_mask */				0,
+	/* .cache_reusable */			0,
+	/* .cache_revalidate */			0,
+	/* .cache_intermediaries */		0,
+	/* .origin_protocol */			LWSMPRO_FILE, // files in a dir
+	/* .mountpoint_len */			0, // char count
+	/* .basic_auth_login_file */	NULL,
 };
 
 static struct lws_http_mount frontMount = {
-		/* .mount_next */		&examplesMount,		/* linked-list "next" */
-		/* .mountpoint */		NULL,		/* mountpoint URL */
-		/* .origin */			"front",		/* serve from dir */
-		/* .def */			"index.html",	/* default filename */
-		/* .protocol */			NULL,
-		/* .cgienv */			NULL,
-		/* .extra_mimetypes */		NULL,
-		/* .interpret */		NULL,
-		/* .cgi_timeout */		0,
-		/* .cache_max_age */		0,
-		/* .auth_mask */		0,
-		/* .cache_reusable */		0,
-		/* .cache_revalidate */		0,
-		/* .cache_intermediaries */	0,
-		/* .origin_protocol */		LWSMPRO_FILE,	/* files in a dir */
-		/* .mountpoint_len */		0,		/* char count */
-		/* .basic_auth_login_file */	NULL,
+	/* .mount_next */				&examplesMount, // linked-list "next"
+	/* .mountpoint */				NULL, // mountpoint URL
+	/* .origin */					"front", // serve from dir
+	/* .def */						"index.html", // default filename
+	/* .protocol */					NULL,
+	/* .cgienv */					NULL,
+	/* .extra_mimetypes */			NULL,
+	/* .interpret */				NULL,
+	/* .cgi_timeout */				0,
+	/* .cache_max_age */			0,
+	/* .auth_mask */				0,
+	/* .cache_reusable */			0,
+	/* .cache_revalidate */			0,
+	/* .cache_intermediaries */		0,
+	/* .origin_protocol */			LWSMPRO_FILE, // files in a dir
+	/* .mountpoint_len */			0, // char count
+	/* .basic_auth_login_file */	NULL,
 };
 
 struct luaAllocatorState_t {
@@ -593,6 +642,10 @@ int main(int argc, char *argv[]) {
 	auto examplesListMountPoint = examplesMountPoint + "/list";
 	examplesListMount.mountpoint = examplesListMountPoint.c_str();
 	examplesListMount.mountpoint_len = examplesListMountPoint.length();
+
+	auto runningCodeMountPoint = string(argv[3]) + "/running";
+	runningCodeMount.mountpoint = runningCodeMountPoint.c_str();
+	runningCodeMount.mountpoint_len = runningCodeMountPoint.length();
 
 	info.mounts = &frontMount;
 	info.gid = -1;

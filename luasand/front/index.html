@@ -82,6 +82,13 @@
 	<body>
 		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
 		<script>
+			function httpGet(url) {
+				let xmlHttp = new XMLHttpRequest();
+				xmlHttp.open('GET', url, false);
+				xmlHttp.send(null);
+				return xmlHttp.responseText;
+			}
+
 			function startWebsocket() {
 				window.ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') +
 					location.host + location.pathname, 'code');
@@ -138,14 +145,8 @@
 					system_console_error(message);
 				};
 
-				let xmlHttp = new XMLHttpRequest();
-				xmlHttp.open('GET', 'examples/list', false);
-				xmlHttp.send(null);
-				window.codeExamples = xmlHttp.responseText.trimRight().split('\n').map((exampleName) => {
-					let xmlHttp = new XMLHttpRequest();
-					xmlHttp.open('GET', 'examples/' + exampleName, false);
-					xmlHttp.send(null);
-					return xmlHttp.responseText;
+				window.codeExamples = httpGet('examples/list').trimRight().split('\n').map((exampleName) => {
+					return httpGet('examples/' + exampleName);
 				});
 
 				codeExamples.forEach((code, index) => {
@@ -199,7 +200,12 @@
 		<div class="panel" style="grid-area: d;">
 			<hr>
 			<span id="connectionIndicator" class="dot"></span>
-			<button type="button" onclick="ws.send(codeArea.getValue())">&#x1f3c3; Run from editor</button>	
+			<button type="button" onclick="ws.send(codeArea.getValue())">
+				&#x1f3c3; Run from editor
+			</button>
+			<button type="button" onclick="codeArea.setValue(httpGet('running'), -1)">
+				&#x1f4d1; Load running code to editor
+			</button>
 			<hr>
 		</div>
 		<div id="examplesArea" style="grid-area: b; overflow-y: auto; overflow-x: hidden;">
