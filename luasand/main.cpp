@@ -176,7 +176,10 @@ bool runLuaSandboxed(const char *byteCode,
 			success = false;
 		}
 	} else {
-		auto error = lua_tostring(gLuaState, -2);
+		auto error = lua_tostring(gLuaState, -3);
+		if (error == NULL) {
+			error = "Unknown error";
+		}
 		if (client != nullptr) {
 			client->print(error);
 		} else {

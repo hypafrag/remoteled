@@ -36,6 +36,9 @@ _VERSION assert error	ipairs   next pairs
 pcall	select tonumber tostring type xpcall
 coroutine.create coroutine.resume coroutine.running coroutine.status
 coroutine.wrap   coroutine.yield
+bit32.arshift bit32.band    bit32.bnot    bit32.bor    bit32.btest
+bit32.bxor    bit32.extract bit32.lrotate bit32.lshift bit32.replace
+bit32.rrotate bit32.rshift
 math.abs   math.acos math.asin  math.atan math.atan2 math.ceil
 math.cos   math.cosh math.deg   math.exp  math.fmod  math.floor
 math.frexp math.huge math.ldexp math.log  math.log10 math.max
@@ -66,7 +69,7 @@ local function protect_module(module, module_name)
 	})
 end
 
-('coroutine math os string table'):gsub('%S+', function(module_name)
+('coroutine math os string table bit32'):gsub('%S+', function(module_name)
 	BASE_ENV[module_name] = protect_module(BASE_ENV[module_name], module_name)
 end)
 
