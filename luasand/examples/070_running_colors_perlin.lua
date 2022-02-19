@@ -35,4 +35,4 @@ for _, cstate in ipairs(state) do
     cstate.offset = cstate.offset + cstate.step
 end
 
-return result, 40, state
+return result, 60, state
