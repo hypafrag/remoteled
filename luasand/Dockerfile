@@ -5,7 +5,7 @@ ADD init.lua /srv
 ADD front /srv/front
 ADD examples /srv/examples
 ADD main.cpp perlin.cpp perlin.h CMakeLists.txt ./
-RUN mkdir build && cd build && cmake .. && make && cp luasand /srv/luasand
+RUN mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make && cp luasand /srv/luasand
 
 FROM alpine:3.13.6
 
