@@ -23,6 +23,8 @@ extern "C" {
 
 #include <dirent.h>
 
+#include "perlin.h"
+
 using namespace std;
 
 #define LUA_CODE_LEN (1024 * 1024 * 1) // 1 Mb
@@ -93,6 +95,18 @@ static int lua_timestamp(lua_State *L) {
 }
 
 static int lua_addcolor(lua_State *L) {
+	auto argnum = lua_gettop(L);
+	if (argnum != 2) {
+		return luaL_error(L, "addcolor requires 2 arguments, %d given", argnum);
+	}
+	auto arg1type = lua_type(L, 1);
+	if (arg1type != LUA_TTABLE) {
+		return luaL_error(L, "addcolor argument 1 should be table, %s given", lua_typename(L, arg1type));
+	}
+	auto arg2type = lua_type(L, 2);
+	if (arg2type != LUA_TNUMBER) {
+		return luaL_error(L, "addcolor argument 2 should be number, %s given", lua_typename(L, arg2type));
+	}
 	auto color = lua_tointeger(L, 2);
 	auto len = (lua_Integer)lua_rawlen(L, 1);
 	lua_pushinteger(L, color >> 16);
@@ -105,6 +119,22 @@ static int lua_addcolor(lua_State *L) {
 }
 
 static int lua_setcolor(lua_State *L) {
+	auto argnum = lua_gettop(L);
+	if (argnum != 3) {
+		return luaL_error(L, "setcolor requires 3 arguments, %d given", argnum);
+	}
+	auto arg1type = lua_type(L, 1);
+	if (arg1type != LUA_TTABLE) {
+		return luaL_error(L, "setcolor argument 1 should be table, %s given", lua_typename(L, arg1type));
+	}
+	auto arg2type = lua_type(L, 2);
+	if (arg2type != LUA_TNUMBER) {
+		return luaL_error(L, "setcolor argument 2 should be number, %s given", lua_typename(L, arg2type));
+	}
+	auto arg3type = lua_type(L, 3);
+	if (arg3type != LUA_TNUMBER) {
+		return luaL_error(L, "setcolor argument 3 should be number, %s given", lua_typename(L, arg3type));
+	}
 	auto color = lua_tointeger(L, 3);
 	auto index = (lua_tointeger(L, 2) - 1) * 3;
 	lua_pushinteger(L, color >> 16);
@@ -114,6 +144,25 @@ static int lua_setcolor(lua_State *L) {
 	lua_pushinteger(L, color & 0xff);
 	lua_rawseti(L, 1, ++index);
 	return 0;
+}
+
+static int lua_perlin(lua_State *L) {
+	auto argnum = lua_gettop(L);
+	if (argnum > 3) {
+		return luaL_error(L, "perlin requires up to 3 arguments, %d given", argnum);
+	}
+	lua_Number args[3] = {0.0, 0.0, 0.0};
+	for (int i = 0; i < argnum; i++) {
+		auto stackidx = i + 1;
+		auto argtype = lua_type(L, stackidx);
+		if (argtype != LUA_TNUMBER) {
+			return luaL_error(L, "perlin arguments should be numbers, argument %d %s given",
+				stackidx, lua_typename(L, argtype));
+		}
+		args[i] = lua_tonumber(L, stackidx);
+	}
+	lua_pushnumber(L, perlin(args[0], args[1], args[2]));
+	return 1;
 }
 
 bool compileLua(const char *code, char *bytecode, size_t *bytecodeSize) {
@@ -611,6 +660,8 @@ int main(int argc, char *argv[]) {
 	lua_setglobal(gLuaState, "addcolor");
 	lua_pushcfunction(gLuaState, lua_setcolor);
 	lua_setglobal(gLuaState, "setcolor");
+	lua_pushcfunction(gLuaState, lua_perlin);
+	lua_setglobal(gLuaState, "perlin");
 
 	lua_pushinteger(gLuaState, PIX_NUM);
 	lua_setglobal(gLuaState, "PIX_NUM");

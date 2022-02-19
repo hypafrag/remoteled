@@ -337,3 +337,46 @@ for i = 0, PIX_NUM - 1 do
 end
 
 return result, DELAY_MIN
+
+
+---
+
+
+local result = {}
+local state = STATE or {}
+
+for i = 1, PIX_NUM do
+    addcolor(result, 0)
+end
+
+if math.random(0, 100) < 4 then
+    local color = {}
+    addcolor(color, gamma(math.random(0x000000, 0xffffff)))
+    table.insert(state, {
+        color = color,
+        pos = 1.0,
+        step = math.random() + 0.4 + math.random(0, 4),
+    })
+end
+
+local toremove = {}
+
+for i, v in ipairs(state) do
+    if (math.floor(v.pos) >= PIX_NUM) then
+        table.insert(toremove, i)
+    else
+        for j = math.floor(v.pos), math.min(math.ceil(v.pos + v.step) - 1, PIX_NUM) do
+            local offset = ((j - 1) * 3) + 1
+            result[offset + 0] = math.min(result[offset + 0] + v.color[1], 0x60)
+            result[offset + 1] = math.min(result[offset + 1] + v.color[2], 0x60)
+            result[offset + 2] = math.min(result[offset + 2] + v.color[3], 0x60)
+        end
+        v.pos = v.pos + v.step
+    end
+end
+
+for i = #toremove, 1, -1 do
+    table.remove(state, toremove[i])
+end
+
+return result, DELAY_MIN, state

@@ -5,7 +5,7 @@ project(luasand)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 14)
 
-set(SOURCE_FILES main.cpp)
+set(SOURCE_FILES main.cpp perlin.cpp)
 
 if (EXISTS /usr/lib/lua5.3)
     link_directories(/usr/lib/lua5.3)
