@@ -80,7 +80,7 @@
 	</head>
 
 	<body>
-		<script src="https://pagecdn.io/lib/ace/1.4.12/ace.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.9.6/ace.min.js"></script>
 		<script>
 			function httpGet(url) {
 				let xmlHttp = new XMLHttpRequest();
@@ -213,7 +213,7 @@
 		</div>
 		<textarea id="log" style="grid-area: c;" readonly></textarea>
 		<script>
-			ace.config.set('basePath', 'https://pagecdn.io/lib/ace/1.4.12');
+			ace.config.set('basePath', 'https://cdnjs.cloudflare.com/ajax/libs/ace/1.9.6');
 			window.codeArea = ace.edit('codeArea');
 			codeArea.setTheme('ace/theme/monokai');
 			codeArea.session.setMode('ace/mode/lua');
