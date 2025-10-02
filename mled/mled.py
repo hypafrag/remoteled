@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 """
-Real-time ALSA audio monitoring with WebSocket client.
+Real-time ALSA audio monitoring with WebSocket or Serial Port output.
 Uses ALSA loopback directly via arecord subprocess - no PortAudio dependency.
 
 Requires Python 3.7 or later.
+
+Usage:
+  python3 mled.py <websocket_uri_or_serial_port>
+
+Examples:
+  python3 mled.py ws://192.168.3.6:8888        # WebSocket mode (sends Lua code)
+  python3 mled.py /dev/ttyUSB0                  # Serial port mode (sends raw RGB data)
+  python3 mled.py /dev/ttyACM0                  # Serial port mode (Arduino)
 
 Setup ALSA loopback for system audio monitoring:
 1. Load the ALSA loopback module: sudo modprobe snd-aloop
@@ -16,6 +24,10 @@ Setup ALSA loopback for system audio monitoring:
 The loopback creates a virtual audio cable where:
 - hw:1,0 is the playback side (system audio output)
 - hw:1,1 is the capture side (this script input)
+
+Output formats:
+- WebSocket: Sends Lua code with LED array to luasand server
+- Serial: Sends raw 900 bytes (300 RGB values) directly to serial device
 """
 
 import sys
@@ -33,6 +45,8 @@ import queue
 import time
 import subprocess
 import struct
+import os
+import sys
 from typing import Optional, Tuple
 
 # Configuration constants
@@ -98,9 +112,9 @@ def analyze_frequency_bands(audio_data: np.ndarray, sample_rate: int, boost_fact
     return bass_level, mid_level, treble_level
 
 
-def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300) -> str:
+def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300) -> bytes:
     """
-    Generate Lua code with three colored lines extending from center outward.
+    Generate LED data as raw bytes for serial port or Lua code for WebSocket.
     Each frequency range creates its own colored line with quadratic decay from center.
     
     Args:
@@ -110,7 +124,7 @@ def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300
         pix_num: Number of LEDs in the strip
         
     Returns:
-        str: Simple Lua code that returns pre-calculated LED array
+        bytes: Raw RGB data (3 bytes per LED: R, G, B)
     """
     # Clamp values to 0.0-1.0 range
     bass = max(0.0, min(1.0, bass))
@@ -173,11 +187,17 @@ def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300
         if treble_reach > 0:
             leds[idx + 2] = MAX_COLOR_INTENSITY  # B (treble)
     
-    # Generate simple Lua code with pre-calculated values
-    led_values = ",".join(map(str, leds))
-    lua_code = f"return {{{led_values}}}"
-    
-    return lua_code
+    # Return as raw bytes for serial port
+    return bytes(leds)
+
+def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300) -> str:
+    """
+    Generate Lua code for WebSocket mode.
+    Wrapper around generate_led_data that formats as Lua code.
+    """
+    led_data = generate_led_data(bass, mid, treble, pix_num)
+    led_values = ",".join(map(str, led_data))
+    return f"return {{{led_values}}}"
 
 
 class ALSAAudioMonitor:
@@ -344,6 +364,85 @@ class ALSAAudioMonitor:
                 print(f"Error in frequency analysis: {e}")
                 
 
+class SerialPortClient:
+    """Serial port client for sending raw LED data."""
+    
+    def __init__(self, port_path: str, baud_rate: int = 115200):
+        self.port_path = port_path
+        self.baud_rate = baud_rate
+        self.serial_fd = None
+        
+    def connect_and_send(self, audio_monitor: ALSAAudioMonitor):
+        """Connect to serial port and send LED data based on frequency analysis."""
+        try:
+            # Open serial port using Linux file I/O
+            self.serial_fd = os.open(self.port_path, os.O_RDWR | os.O_NOCTTY)
+            
+            # Configure serial port (similar to main.cpp termios setup)
+            try:
+                import termios
+                
+                # Get current attributes
+                attrs = termios.tcgetattr(self.serial_fd)
+                
+                # Configure like main.cpp:
+                # 8 data bits, no parity, 1 stop bit, 115200 baud
+                attrs[0] = 0  # input flags
+                attrs[1] = 0  # output flags  
+                attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL  # control flags
+                attrs[3] = 0  # local flags
+                attrs[4] = termios.B115200  # input speed
+                attrs[5] = termios.B115200  # output speed
+                
+                # Non-blocking mode
+                attrs[6][termios.VTIME] = 0
+                attrs[6][termios.VMIN] = 0
+                
+                # Apply settings
+                termios.tcsetattr(self.serial_fd, termios.TCSANOW, attrs)
+                termios.tcflush(self.serial_fd, termios.TCIOFLUSH)
+                
+                print(f"✓ Serial port configured: {self.port_path} @ {self.baud_rate} baud")
+                
+            except ImportError:
+                print(f"⚠️ termios not available, using basic configuration for {self.port_path}")
+            except Exception as e:
+                print(f"⚠️ Could not configure serial port: {e}")
+                print(f"Using basic configuration for {self.port_path}")
+            
+            # Create queue for frequency analysis values
+            audio_monitor.websocket_queue = queue.Queue()
+            
+            while True:
+                try:
+                    # Get frequency analysis (non-blocking with timeout)
+                    bass, mid, treble = audio_monitor.websocket_queue.get(timeout=0.1)
+                    
+                    # Generate raw LED data
+                    led_data = generate_led_data(bass, mid, treble)
+                    
+                    # Send raw bytes to serial port (900 bytes total)
+                    if len(led_data) == 900:  # 300 LEDs * 3 bytes each
+                        bytes_written = os.write(self.serial_fd, led_data)
+                        if bytes_written != 900:
+                            print(f"⚠️ Only wrote {bytes_written} of 900 bytes")
+                    else:
+                        print(f"❌ Invalid LED data size: {len(led_data)} (expected 900)")
+                        
+                except queue.Empty:
+                    continue
+                    
+                except KeyboardInterrupt:
+                    print("\nSerial client shutting down...")
+                    break
+                    
+        except Exception as e:
+            print(f"Serial port error: {e}")
+        finally:
+            if self.serial_fd is not None:
+                os.close(self.serial_fd)
+
+
 class WebSocketClient:
     """WebSocket client for sending Lua code."""
     
@@ -408,22 +507,49 @@ class WebSocketClient:
 
 
 async def main():
-    """Main function to run the microphone RMS monitor and WebSocket client."""
-    # WebSocket configuration
-    websocket_uri = "ws://192.168.3.6:8888"
+    """Main function to run the audio monitor and output client."""
+    # Check command line arguments
+    if len(sys.argv) < 2:
+        print("Usage: python3 mled.py <websocket_uri_or_serial_port>")
+        print("Examples:")
+        print("  python3 mled.py ws://192.168.3.6:8888")
+        print("  python3 mled.py /dev/ttyUSB0")
+        print("  python3 mled.py /dev/ttyACM0")
+        sys.exit(1)
+    
+    output_target = sys.argv[1]
     
     # Initialize ALSA audio monitor
     audio_monitor = ALSAAudioMonitor()
-    
-    # Initialize WebSocket client
-    ws_client = WebSocketClient(websocket_uri, "code")
     
     try:
         print("Starting audio monitoring...")
         audio_monitor.start_monitoring()
         
-        print(f"Connecting to WebSocket at {websocket_uri}...")
-        await ws_client.connect_and_send(audio_monitor)
+        # Detect if target is WebSocket URL or serial port
+        if output_target.startswith("ws://") or output_target.startswith("wss://"):
+            print(f"WebSocket mode: connecting to {output_target}")
+            ws_client = WebSocketClient(output_target, "code")
+            await ws_client.connect_and_send(audio_monitor)
+        else:
+            print(f"Serial port mode: using {output_target}")
+            serial_client = SerialPortClient(output_target)
+            # Serial client runs synchronously, so we need to run it in a thread
+            import threading
+            
+            def run_serial_client():
+                serial_client.connect_and_send(audio_monitor)
+            
+            serial_thread = threading.Thread(target=run_serial_client)
+            serial_thread.daemon = True
+            serial_thread.start()
+            
+            # Keep the main thread alive
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                print("\nShutting down...")
         
     except KeyboardInterrupt:
         print("\nShutting down...")
