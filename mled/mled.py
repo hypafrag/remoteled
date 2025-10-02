@@ -61,12 +61,12 @@ CHUNK_SIZE = 1024
 # Frequency band definitions for bass, mid, treble (in Hz)
 BASS_FREQ_RANGE = (10, 100)    # Bass frequencies
 MID_FREQ_RANGE = (250, 2000)   # Mid frequencies  
-TREBLE_FREQ_RANGE = (4000, 20000)  # Treble frequencies
+TREBLE_FREQ_RANGE = (2000, 20000)  # Treble frequencies
 
 # Default boost factors (used when adaptive boost is disabled)
-DEFAULT_BASS_BOOST = 0.6
-DEFAULT_MID_BOOST = 1.5
-DEFAULT_TREBLE_BOOST = 8.0
+DEFAULT_BASS_BOOST = 0.5
+DEFAULT_MID_BOOST = 1.6
+DEFAULT_TREBLE_BOOST = 11.0
 
 def analyze_frequency_bands(audio_data: np.ndarray, sample_rate: int, boost_factors: Tuple[float, float, float] = (3.0, 2.0, 4.0)) -> Tuple[float, float, float]:
     """

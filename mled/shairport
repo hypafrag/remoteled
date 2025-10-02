@@ -1,0 +1,1 @@
+docker run -d --privileged --rm --cap-add=SYS_NICE --net host --device /dev/snd mikebrady/shairport-sync:latest -- -d hw:1,0
