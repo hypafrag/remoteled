@@ -128,7 +128,7 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
         enable_mid: Enable mid frequency visualization (green)
         enable_treble: Enable treble frequency visualization (blue)
         center_shift: Offset from strip center (-150 to +150 for 300 LED strip)
-        rms_scale: Scale factor based on signal RMS (0.0-1.0, quiet=smaller lines)
+        rms_scale: Scale factor based on signal RMS (0.0-1.0, quiet=smaller/dimmer lines)
         
     Returns:
         bytes: Raw RGB data (3 bytes per LED: R, G, B)
@@ -165,12 +165,13 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
         leds.extend([0, 0, 0])  # R, G, B = 0, 0, 0 (black)
     
     def calculate_intensity(distance_from_center: int, max_distance: int) -> int:
-        """Calculate LED intensity using quadratic decay from center."""
+        """Calculate LED intensity using quadratic decay from center and RMS scaling."""
         if max_distance == 0:
             return 0
         # Quadratic decay: intensity = max * (1 - (distance/max_distance)^2)
         decay_factor = 1.0 - (distance_from_center / max_distance) ** 2
-        return int(MAX_COLOR_INTENSITY * decay_factor)
+        # Apply RMS scaling to color intensity as well (quiet = dimmer, loud = brighter)
+        return int(MAX_COLOR_INTENSITY * decay_factor * rms_scale)
     
     # Light up LEDs from center outward for each frequency band with quadratic decay
     for i in range(1, max(bass_reach, mid_reach, treble_reach) + 1):
@@ -194,15 +195,16 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
             if enable_treble and i <= treble_reach:
                 leds[idx + 2] = calculate_intensity(i, treble_reach)  # B (treble)
     
-    # Handle center LED - full intensity for any active frequency
+    # Handle center LED - full intensity for any active frequency, scaled by RMS
     if bass_reach > 0 or mid_reach > 0 or treble_reach > 0:
         idx = center * 3
+        center_intensity = int(MAX_COLOR_INTENSITY * rms_scale)
         if enable_bass and bass_reach > 0:
-            leds[idx] = MAX_COLOR_INTENSITY      # R (bass)
+            leds[idx] = center_intensity      # R (bass)
         if enable_mid and mid_reach > 0:
-            leds[idx + 1] = MAX_COLOR_INTENSITY  # G (mid)
+            leds[idx + 1] = center_intensity  # G (mid)
         if enable_treble and treble_reach > 0:
-            leds[idx + 2] = MAX_COLOR_INTENSITY  # B (treble)
+            leds[idx + 2] = center_intensity  # B (treble)
     
     # Return as raw bytes for serial port
     return bytes(leds)
@@ -380,11 +382,11 @@ class ALSAAudioMonitor:
     
     def _get_rms_scale_factor(self, rms_level: float) -> float:
         """
-        Calculate RMS-based line scaling factor.
+        Calculate RMS-based scaling factor for both line length and color intensity.
         
         Returns a scale factor (0.0-1.0) where:
-        - High RMS (loud audio) -> scale factor closer to 1.0 (full length lines)
-        - Low RMS (quiet audio) -> scale factor closer to 0.0 (short lines)
+        - High RMS (loud audio) -> scale factor closer to 1.0 (full length, bright lines)
+        - Low RMS (quiet audio) -> scale factor closer to 0.0 (short, dim lines)
         
         This creates natural visual dynamics where quiet audio produces subtle
         visualization and loud audio produces dramatic visualization.
@@ -625,7 +627,7 @@ Examples:
   %(prog)s ws://192.168.3.6:8888 --interval 20          # 20ms update interval (faster)
   %(prog)s /dev/ttyUSB0 -c 50                 # Shift center point 50 LEDs to the right
   %(prog)s ws://192.168.3.6:8888 --center-shift -30     # Shift center 30 LEDs to the left
-  %(prog)s /dev/ttyUSB0 --rms-scale           # Enable RMS scaling (dynamic line length)
+  %(prog)s /dev/ttyUSB0 --rms-scale           # Enable RMS scaling (dynamic length/brightness)
   %(prog)s ws://192.168.3.6:8888 --rms-scale --adaptive-boost  # Full dynamic mode
 
 ALSA Setup:
@@ -720,7 +722,7 @@ Output formats:
     parser.add_argument(
         '--rms-scale',
         action='store_true',
-        help='Enable RMS-based line scaling (quiet audio = shorter lines, loud audio = longer lines)'
+        help='Enable RMS-based scaling (quiet audio = shorter/dimmer lines, loud audio = longer/brighter lines)'
     )
     
     return parser.parse_args()
@@ -762,7 +764,7 @@ async def main():
     if not args.adaptive_boost:
         print(f"Fixed boost factors: bass={DEFAULT_BASS_BOOST}, mid={DEFAULT_MID_BOOST}, treble={DEFAULT_TREBLE_BOOST}")
     if args.rms_scale:
-        print("RMS scaling: quiet audio = shorter lines, loud audio = longer lines")
+        print("RMS scaling: quiet audio = shorter/dimmer lines, loud audio = longer/brighter lines")
     
     # Display enabled frequency bands
     bands = []
