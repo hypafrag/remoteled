@@ -113,7 +113,8 @@ def analyze_frequency_bands(audio_data: np.ndarray, sample_rate: int, boost_fact
 
 
 def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300, 
-                     enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True) -> bytes:
+                     enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True,
+                     center_shift: int = 0) -> bytes:
     """
     Generate LED data as raw bytes for serial port or Lua code for WebSocket.
     Each frequency range creates its own colored line with quadratic decay from center.
@@ -123,6 +124,10 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
         mid: Mid level (0.0-1.0) -> Green line length from center
         treble: Treble level (0.0-1.0) -> Blue line length from center
         pix_num: Number of LEDs in the strip
+        enable_bass: Enable bass frequency visualization (red)
+        enable_mid: Enable mid frequency visualization (green)
+        enable_treble: Enable treble frequency visualization (blue)
+        center_shift: Offset from strip center (-150 to +150 for 300 LED strip)
         
     Returns:
         bytes: Raw RGB data (3 bytes per LED: R, G, B)
@@ -132,9 +137,17 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
     mid = max(0.0, min(1.0, mid))
     treble = max(0.0, min(1.0, treble))
     
-    # Calculate center and maximum reach from center
-    center = pix_num // 2
-    max_reach = center  # Maximum LEDs we can light from center to edge
+    # Calculate center with shift and maximum reach from center
+    base_center = pix_num // 2
+    center = base_center + center_shift
+    
+    # Clamp center to valid range
+    center = max(0, min(pix_num - 1, center))
+    
+    # Calculate maximum reach from shifted center (can reach to either edge)
+    max_reach_left = center
+    max_reach_right = pix_num - 1 - center
+    max_reach = max(max_reach_left, max_reach_right)
     
     # Calculate how many LEDs to light up from center for each frequency
     # Only calculate reach for enabled frequency bands
@@ -193,12 +206,13 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
     return bytes(leds)
 
 def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300,
-                     enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True) -> str:
+                     enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True,
+                     center_shift: int = 0) -> str:
     """
     Generate Lua code for WebSocket mode.
     Wrapper around generate_led_data that formats as Lua code.
     """
-    led_data = generate_led_data(bass, mid, treble, pix_num, enable_bass, enable_mid, enable_treble)
+    led_data = generate_led_data(bass, mid, treble, pix_num, enable_bass, enable_mid, enable_treble, center_shift)
     led_values = ",".join(map(str, led_data))
     return f"return {{{led_values}}}"
 
@@ -208,7 +222,7 @@ class ALSAAudioMonitor:
     
     def __init__(self, device: str = ALSA_DEVICE, sample_rate: int = SAMPLE_RATE, adaptive_boost: bool = False,
                  enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True, 
-                 update_interval_ms: int = AUDIO_UPDATE_INTERVAL_MS):
+                 update_interval_ms: int = AUDIO_UPDATE_INTERVAL_MS, center_shift: int = 0):
         self.device = device
         self.sample_rate = sample_rate
         self.adaptive_boost = adaptive_boost
@@ -216,6 +230,7 @@ class ALSAAudioMonitor:
         self.enable_mid = enable_mid
         self.enable_treble = enable_treble
         self.update_interval_ms = update_interval_ms
+        self.center_shift = center_shift
         self.audio_queue = queue.Queue()
         self.running = False
         self.process = None
@@ -453,7 +468,8 @@ class SerialPortClient:
                     led_data = generate_led_data(bass, mid, treble, 300, 
                                                audio_monitor.enable_bass, 
                                                audio_monitor.enable_mid, 
-                                               audio_monitor.enable_treble)
+                                               audio_monitor.enable_treble,
+                                               audio_monitor.center_shift)
                     
                     # Send raw bytes to serial port (900 bytes total)
                     if len(led_data) == 900:  # 300 LEDs * 3 bytes each
@@ -508,7 +524,8 @@ class WebSocketClient:
                         lua_code = generate_lua_code(bass, mid, treble, 300,
                                                     audio_monitor.enable_bass,
                                                     audio_monitor.enable_mid,
-                                                    audio_monitor.enable_treble)
+                                                    audio_monitor.enable_treble,
+                                                    audio_monitor.center_shift)
                         
                         # Send Lua code if it's not empty
                         if lua_code.strip():
@@ -559,6 +576,8 @@ Examples:
   %(prog)s ws://192.168.3.6:8888 --disable-treble        # Only bass (red) and mid (green)
   %(prog)s /dev/ttyUSB0 -i 50                 # 50ms update interval (slower)
   %(prog)s ws://192.168.3.6:8888 --interval 20          # 20ms update interval (faster)
+  %(prog)s /dev/ttyUSB0 -c 50                 # Shift center point 50 LEDs to the right
+  %(prog)s ws://192.168.3.6:8888 --center-shift -30     # Shift center 30 LEDs to the left
 
 ALSA Setup:
   1. Load loopback module: sudo modprobe snd-aloop
@@ -642,6 +661,13 @@ Output formats:
         help='Disable treble frequencies (blue color)'
     )
     
+    parser.add_argument(
+        '-c', '--center-shift',
+        type=int,
+        default=0,
+        help='Shift center point by N LEDs (-150 to +150 for 300 LED strip, default: 0)'
+    )
+    
     return parser.parse_args()
 
 async def main():
@@ -667,12 +693,14 @@ async def main():
         enable_bass=enable_bass,
         enable_mid=enable_mid,
         enable_treble=enable_treble,
-        update_interval_ms=args.interval
+        update_interval_ms=args.interval,
+        center_shift=args.center_shift
     )
     
     print(f"Audio device: {args.device}")
     print(f"Sample rate: {args.sample_rate} Hz")
     print(f"Update interval: {args.interval} ms")
+    print(f"Center shift: {args.center_shift} LEDs")
     print(f"Adaptive boost: {'enabled' if args.adaptive_boost else 'disabled'}")
     if not args.adaptive_boost:
         print(f"Fixed boost factors: bass={DEFAULT_BASS_BOOST}, mid={DEFAULT_MID_BOOST}, treble={DEFAULT_TREBLE_BOOST}")
