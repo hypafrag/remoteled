@@ -59,12 +59,12 @@ SAMPLE_FORMAT = "S32_LE"  # 32-bit little endian (loopback device requirement)
 CHUNK_SIZE = 1024
 
 # Frequency band definitions for bass, mid, treble (in Hz)
-BASS_FREQ_RANGE = (20, 250)    # Bass frequencies
-MID_FREQ_RANGE = (250, 3000)   # Mid frequencies  
-TREBLE_FREQ_RANGE = (3000, 20000)  # Treble frequencies
+BASS_FREQ_RANGE = (10, 100)    # Bass frequencies
+MID_FREQ_RANGE = (250, 2000)   # Mid frequencies  
+TREBLE_FREQ_RANGE = (4000, 20000)  # Treble frequencies
 
 # Default boost factors (used when adaptive boost is disabled)
-DEFAULT_BASS_BOOST = 2.0
+DEFAULT_BASS_BOOST = 0.6
 DEFAULT_MID_BOOST = 1.5
 DEFAULT_TREBLE_BOOST = 8.0
 
@@ -114,7 +114,7 @@ def analyze_frequency_bands(audio_data: np.ndarray, sample_rate: int, boost_fact
 
 def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300, 
                      enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True,
-                     center_shift: int = 0) -> bytes:
+                     center_shift: int = 0, rms_scale: float = 1.0) -> bytes:
     """
     Generate LED data as raw bytes for serial port or Lua code for WebSocket.
     Each frequency range creates its own colored line with quadratic decay from center.
@@ -128,6 +128,7 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
         enable_mid: Enable mid frequency visualization (green)
         enable_treble: Enable treble frequency visualization (blue)
         center_shift: Offset from strip center (-150 to +150 for 300 LED strip)
+        rms_scale: Scale factor based on signal RMS (0.0-1.0, quiet=smaller lines)
         
     Returns:
         bytes: Raw RGB data (3 bytes per LED: R, G, B)
@@ -150,10 +151,11 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
     max_reach = max(max_reach_left, max_reach_right)
     
     # Calculate how many LEDs to light up from center for each frequency
+    # Apply RMS scaling to make lines smaller on quiet audio
     # Only calculate reach for enabled frequency bands
-    bass_reach = int(bass * max_reach) if enable_bass else 0
-    mid_reach = int(mid * max_reach) if enable_mid else 0
-    treble_reach = int(treble * max_reach) if enable_treble else 0
+    bass_reach = int(bass * max_reach * rms_scale) if enable_bass else 0
+    mid_reach = int(mid * max_reach * rms_scale) if enable_mid else 0
+    treble_reach = int(treble * max_reach * rms_scale) if enable_treble else 0
     
     # Create RGB byte array (3 bytes per LED: R, G, B)
     leds = []
@@ -207,12 +209,12 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
 
 def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300,
                      enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True,
-                     center_shift: int = 0) -> str:
+                     center_shift: int = 0, rms_scale: float = 1.0) -> str:
     """
     Generate Lua code for WebSocket mode.
     Wrapper around generate_led_data that formats as Lua code.
     """
-    led_data = generate_led_data(bass, mid, treble, pix_num, enable_bass, enable_mid, enable_treble, center_shift)
+    led_data = generate_led_data(bass, mid, treble, pix_num, enable_bass, enable_mid, enable_treble, center_shift, rms_scale)
     led_values = ",".join(map(str, led_data))
     return f"return {{{led_values}}}"
 
@@ -222,7 +224,7 @@ class ALSAAudioMonitor:
     
     def __init__(self, device: str = ALSA_DEVICE, sample_rate: int = SAMPLE_RATE, adaptive_boost: bool = False,
                  enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True, 
-                 update_interval_ms: int = AUDIO_UPDATE_INTERVAL_MS, center_shift: int = 0):
+                 update_interval_ms: int = AUDIO_UPDATE_INTERVAL_MS, center_shift: int = 0, rms_scale_enabled: bool = False):
         self.device = device
         self.sample_rate = sample_rate
         self.adaptive_boost = adaptive_boost
@@ -231,6 +233,7 @@ class ALSAAudioMonitor:
         self.enable_treble = enable_treble
         self.update_interval_ms = update_interval_ms
         self.center_shift = center_shift
+        self.rms_scale_enabled = rms_scale_enabled
         self.audio_queue = queue.Queue()
         self.running = False
         self.process = None
@@ -239,6 +242,7 @@ class ALSAAudioMonitor:
         self.bass_history = []
         self.mid_history = []
         self.treble_history = []
+        self.rms_history = []  # Track RMS levels for line scaling
         self.history_size = 100
         
     def start_monitoring(self):
@@ -373,6 +377,40 @@ class ALSAAudioMonitor:
         treble_boost = max(0.5, min(10.0, treble_boost))
         
         return bass_boost, mid_boost, treble_boost
+    
+    def _get_rms_scale_factor(self, rms_level: float) -> float:
+        """
+        Calculate RMS-based line scaling factor.
+        
+        Returns a scale factor (0.0-1.0) where:
+        - High RMS (loud audio) -> scale factor closer to 1.0 (full length lines)
+        - Low RMS (quiet audio) -> scale factor closer to 0.0 (short lines)
+        
+        This creates natural visual dynamics where quiet audio produces subtle
+        visualization and loud audio produces dramatic visualization.
+        """
+        # Add current RMS to history
+        self.rms_history.append(rms_level)
+        
+        # Keep only recent history
+        if len(self.rms_history) > self.history_size:
+            self.rms_history.pop(0)
+        
+        # Calculate average RMS over recent history for stability
+        rms_avg = np.mean(self.rms_history) if self.rms_history else 0.001
+        
+        # Scale RMS to 0.0-1.0 range
+        # Typical RMS values range from ~0.001 (very quiet) to ~0.3 (very loud)
+        rms_scale = min(1.0, rms_avg / 0.15)  # 0.15 as "full scale" RMS level
+        
+        # Apply a curve to make the scaling more natural
+        # Square root gives more gradual scaling for quiet sounds
+        rms_scale = np.sqrt(rms_scale)
+        
+        # Ensure minimum scale factor so visualization doesn't completely disappear
+        rms_scale = max(0.1, rms_scale)
+        
+        return rms_scale
         
     def _calculate_frequency_loop(self):
         """Analyze frequency bands at configured interval."""
@@ -391,6 +429,13 @@ class ALSAAudioMonitor:
                     samples = np.array(buffer[:samples_per_interval])
                     buffer = buffer[samples_per_interval:]
                     
+                    # Calculate RMS level for line scaling if enabled
+                    if self.rms_scale_enabled:
+                        rms_level = np.sqrt(np.mean(samples ** 2))
+                        rms_scale = self._get_rms_scale_factor(rms_level)
+                    else:
+                        rms_scale = 1.0  # No scaling when disabled
+                    
                     # First pass: get raw levels for adaptation
                     bass_raw, mid_raw, treble_raw = analyze_frequency_bands(samples, self.sample_rate, (1.0, 1.0, 1.0))
                     
@@ -400,9 +445,9 @@ class ALSAAudioMonitor:
                     # Second pass: apply adaptive boost factors
                     bass, mid, treble = analyze_frequency_bands(samples, self.sample_rate, boost_factors)
                     
-                    # Put frequency analysis in queue for WebSocket sender
+                    # Put frequency analysis and RMS scale in queue for output clients
                     if hasattr(self, 'websocket_queue'):
-                        self.websocket_queue.put((bass, mid, treble))
+                        self.websocket_queue.put((bass, mid, treble, rms_scale))
                         
             except queue.Empty:
                 continue
@@ -461,15 +506,16 @@ class SerialPortClient:
             
             while True:
                 try:
-                    # Get frequency analysis (non-blocking with timeout)
-                    bass, mid, treble = audio_monitor.websocket_queue.get(timeout=0.1)
+                    # Get frequency analysis and RMS scale (non-blocking with timeout)
+                    bass, mid, treble, rms_scale = audio_monitor.websocket_queue.get(timeout=0.1)
                     
-                    # Generate raw LED data
+                    # Generate raw LED data with RMS scaling
                     led_data = generate_led_data(bass, mid, treble, 300, 
                                                audio_monitor.enable_bass, 
                                                audio_monitor.enable_mid, 
                                                audio_monitor.enable_treble,
-                                               audio_monitor.center_shift)
+                                               audio_monitor.center_shift,
+                                               rms_scale)
                     
                     # Send raw bytes to serial port (900 bytes total)
                     if len(led_data) == 900:  # 300 LEDs * 3 bytes each
@@ -517,15 +563,16 @@ class WebSocketClient:
                 
                 while True:
                     try:
-                        # Get frequency analysis (non-blocking with timeout)
-                        bass, mid, treble = audio_monitor.websocket_queue.get(timeout=0.1)
+                        # Get frequency analysis and RMS scale (non-blocking with timeout)
+                        bass, mid, treble, rms_scale = audio_monitor.websocket_queue.get(timeout=0.1)
                         
-                        # Generate Lua code based on frequency analysis
+                        # Generate Lua code based on frequency analysis with RMS scaling
                         lua_code = generate_lua_code(bass, mid, treble, 300,
                                                     audio_monitor.enable_bass,
                                                     audio_monitor.enable_mid,
                                                     audio_monitor.enable_treble,
-                                                    audio_monitor.center_shift)
+                                                    audio_monitor.center_shift,
+                                                    rms_scale)
                         
                         # Send Lua code if it's not empty
                         if lua_code.strip():
@@ -578,6 +625,8 @@ Examples:
   %(prog)s ws://192.168.3.6:8888 --interval 20          # 20ms update interval (faster)
   %(prog)s /dev/ttyUSB0 -c 50                 # Shift center point 50 LEDs to the right
   %(prog)s ws://192.168.3.6:8888 --center-shift -30     # Shift center 30 LEDs to the left
+  %(prog)s /dev/ttyUSB0 --rms-scale           # Enable RMS scaling (dynamic line length)
+  %(prog)s ws://192.168.3.6:8888 --rms-scale --adaptive-boost  # Full dynamic mode
 
 ALSA Setup:
   1. Load loopback module: sudo modprobe snd-aloop
@@ -668,6 +717,12 @@ Output formats:
         help='Shift center point by N LEDs (-150 to +150 for 300 LED strip, default: 0)'
     )
     
+    parser.add_argument(
+        '--rms-scale',
+        action='store_true',
+        help='Enable RMS-based line scaling (quiet audio = shorter lines, loud audio = longer lines)'
+    )
+    
     return parser.parse_args()
 
 async def main():
@@ -694,7 +749,8 @@ async def main():
         enable_mid=enable_mid,
         enable_treble=enable_treble,
         update_interval_ms=args.interval,
-        center_shift=args.center_shift
+        center_shift=args.center_shift,
+        rms_scale_enabled=args.rms_scale
     )
     
     print(f"Audio device: {args.device}")
@@ -702,8 +758,11 @@ async def main():
     print(f"Update interval: {args.interval} ms")
     print(f"Center shift: {args.center_shift} LEDs")
     print(f"Adaptive boost: {'enabled' if args.adaptive_boost else 'disabled'}")
+    print(f"RMS scaling: {'enabled' if args.rms_scale else 'disabled'}")
     if not args.adaptive_boost:
         print(f"Fixed boost factors: bass={DEFAULT_BASS_BOOST}, mid={DEFAULT_MID_BOOST}, treble={DEFAULT_TREBLE_BOOST}")
+    if args.rms_scale:
+        print("RMS scaling: quiet audio = shorter lines, loud audio = longer lines")
     
     # Display enabled frequency bands
     bands = []
