@@ -44,7 +44,7 @@ MAX_COLOR_INTENSITY = 0xAA  # Maximum LED color intensity (170 in decimal)
 ALSA_DEVICE = "hw:1,1"  # ALSA loopback capture device (hw:1,1 for loopback)
 SAMPLE_RATE = 44100
 CHANNELS = 2
-SAMPLE_FORMAT = "S16_LE"  # 16-bit little endian
+SAMPLE_FORMAT = "S32_LE"  # 32-bit little endian (loopback device requirement)
 CHUNK_SIZE = 1024
 
 # Frequency band definitions for bass, mid, treble (in Hz)
@@ -260,7 +260,7 @@ class ALSAAudioMonitor:
             
     def _read_audio_loop(self):
         """Read audio data from arecord subprocess."""
-        bytes_per_sample = 2  # 16-bit = 2 bytes
+        bytes_per_sample = 4  # 32-bit = 4 bytes
         bytes_per_frame = bytes_per_sample * CHANNELS
         bytes_per_chunk = CHUNK_SIZE * bytes_per_frame
         
@@ -272,8 +272,8 @@ class ALSAAudioMonitor:
                     break
                     
                 # Convert bytes to numpy array
-                # S16_LE = signed 16-bit little endian
-                audio_data = np.frombuffer(data, dtype=np.int16)
+                # S32_LE = signed 32-bit little endian
+                audio_data = np.frombuffer(data, dtype=np.int32)
                 
                 # Reshape to separate channels and convert to float
                 if CHANNELS == 2:
@@ -282,7 +282,8 @@ class ALSAAudioMonitor:
                     audio_data = np.mean(audio_data, axis=1)
                 
                 # Convert to float in range [-1.0, 1.0]
-                audio_data = audio_data.astype(np.float32) / 32768.0
+                # 32-bit signed integer range is -2147483648 to 2147483647
+                audio_data = audio_data.astype(np.float32) / 2147483648.0
                 
                 # Put in queue for frequency analysis
                 self.audio_queue.put(audio_data)
