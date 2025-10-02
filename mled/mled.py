@@ -246,7 +246,6 @@ class ALSAAudioMonitor:
         self.bass_history = []
         self.mid_history = []
         self.treble_history = []
-        self.rms_history = []  # Track RMS levels for line scaling
         self.history_size = 100
         
     def start_monitoring(self):
@@ -385,6 +384,7 @@ class ALSAAudioMonitor:
     def _get_rms_scale_factor(self, rms_level: float) -> float:
         """
         Calculate RMS-based scaling factor for both line length and color intensity.
+        Uses immediate RMS value for responsive visualization.
         
         Returns a scale factor (0.0-1.0) where:
         - High RMS (loud audio) -> scale factor closer to 1.0 (full length, bright lines)
@@ -393,19 +393,9 @@ class ALSAAudioMonitor:
         This creates natural visual dynamics where quiet audio produces subtle
         visualization and loud audio produces dramatic visualization.
         """
-        # Add current RMS to history
-        self.rms_history.append(rms_level)
-        
-        # Keep only recent history
-        if len(self.rms_history) > self.history_size:
-            self.rms_history.pop(0)
-        
-        # Calculate average RMS over recent history for stability
-        rms_avg = np.mean(self.rms_history) if self.rms_history else 0.001
-        
-        # Scale RMS to 0.0-1.0 range
+        # Scale immediate RMS to 0.0-1.0 range
         # Typical RMS values range from ~0.001 (very quiet) to ~0.3 (very loud)
-        rms_scale = min(1.0, rms_avg / 0.15)  # 0.15 as "full scale" RMS level
+        rms_scale = min(1.0, rms_level / 0.15)  # 0.15 as "full scale" RMS level
         
         # Apply a curve to make the scaling more natural
         # Square root gives more gradual scaling for quiet sounds
