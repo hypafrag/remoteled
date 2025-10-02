@@ -47,6 +47,7 @@ import subprocess
 import struct
 import os
 import sys
+import argparse
 from typing import Optional, Tuple
 
 # Configuration constants
@@ -66,7 +67,10 @@ BASS_FREQ_RANGE = (20, 250)    # Bass frequencies
 MID_FREQ_RANGE = (250, 3000)   # Mid frequencies  
 TREBLE_FREQ_RANGE = (3000, 20000)  # Treble frequencies
 
-AUTO_ADJUST_BOOST = False  # Enable auto-adjusting boost factors
+# Default boost factors (used when adaptive boost is disabled)
+DEFAULT_BASS_BOOST = 2.0
+DEFAULT_MID_BOOST = 1.5
+DEFAULT_TREBLE_BOOST = 8.0
 
 def analyze_frequency_bands(audio_data: np.ndarray, sample_rate: int, boost_factors: Tuple[float, float, float] = (3.0, 2.0, 4.0)) -> Tuple[float, float, float]:
     """
@@ -203,14 +207,15 @@ def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300
 class ALSAAudioMonitor:
     """Monitors ALSA audio using arecord subprocess."""
     
-    def __init__(self, device: str = ALSA_DEVICE, sample_rate: int = SAMPLE_RATE):
+    def __init__(self, device: str = ALSA_DEVICE, sample_rate: int = SAMPLE_RATE, adaptive_boost: bool = False):
         self.device = device
         self.sample_rate = sample_rate
+        self.adaptive_boost = adaptive_boost
         self.audio_queue = queue.Queue()
         self.running = False
         self.process = None
         
-        # Auto-adjusting boost factors
+        # Auto-adjusting boost factors (only used if adaptive_boost is True)
         self.bass_history = []
         self.mid_history = []
         self.treble_history = []
@@ -314,7 +319,11 @@ class ALSAAudioMonitor:
     
     def _get_adaptive_boost_factors(self, bass_raw: float, mid_raw: float, treble_raw: float) -> Tuple[float, float, float]:
         """Calculate adaptive boost factors based on recent audio history."""
-        # Add current raw values to history
+        if not self.adaptive_boost:
+            # Use fixed boost factors from global constants
+            return DEFAULT_BASS_BOOST, DEFAULT_MID_BOOST, DEFAULT_TREBLE_BOOST
+        
+        # Add current raw values to history for adaptive boost
         self.bass_history.append(bass_raw)
         self.mid_history.append(mid_raw)
         self.treble_history.append(treble_raw)
@@ -325,8 +334,25 @@ class ALSAAudioMonitor:
             self.mid_history.pop(0)
             self.treble_history.pop(0)
         
-        # Use fixed boost factors for simplicity
-        return 2.0, 1.5, 8.0
+        # Calculate target level (we want each band to reach ~0.7 on average)
+        target_level = 0.7
+        
+        # Calculate average levels over recent history
+        bass_avg = np.mean(self.bass_history) if self.bass_history else 0.001
+        mid_avg = np.mean(self.mid_history) if self.mid_history else 0.001
+        treble_avg = np.mean(self.treble_history) if self.treble_history else 0.001
+        
+        # Calculate desired boost factors to reach target
+        bass_boost = target_level / max(bass_avg, 0.001)
+        mid_boost = target_level / max(mid_avg, 0.001)
+        treble_boost = target_level / max(treble_avg, 0.001)
+        
+        # Clamp boost factors to reasonable range
+        bass_boost = max(0.5, min(10.0, bass_boost))
+        mid_boost = max(0.5, min(10.0, mid_boost))
+        treble_boost = max(0.5, min(10.0, treble_boost))
+        
+        return bass_boost, mid_boost, treble_boost
         
     def _calculate_frequency_loop(self):
         """Analyze frequency bands at configured interval."""
@@ -506,34 +532,85 @@ class WebSocketClient:
             print(f"WebSocket error: {e}")
 
 
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Real-time ALSA audio monitoring with WebSocket or Serial Port output",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s ws://192.168.3.6:8888           # WebSocket mode (sends Lua code)
+  %(prog)s /dev/ttyUSB0                     # Serial port mode (sends raw RGB data)
+  %(prog)s /dev/ttyACM0 --adaptive-boost   # Serial mode with adaptive boost
+  %(prog)s ws://example.com:8888 -a        # WebSocket mode with adaptive boost
+
+ALSA Setup:
+  1. Load loopback module: sudo modprobe snd-aloop
+  2. Set system output to hw:1,0, script monitors hw:1,1
+  3. Check devices: arecord -l
+
+Output formats:
+  WebSocket: Sends Lua code with LED array to luasand server
+  Serial:    Sends raw 900 bytes (300 RGB values) directly to device
+        """
+    )
+    
+    parser.add_argument(
+        'output',
+        help='WebSocket URI (ws://...) or serial port path (/dev/ttyUSB0, etc.)'
+    )
+    
+    parser.add_argument(
+        '-a', '--adaptive-boost',
+        action='store_true',
+        help=f'Enable adaptive boost factors (default: use fixed values {DEFAULT_BASS_BOOST}, {DEFAULT_MID_BOOST}, {DEFAULT_TREBLE_BOOST})'
+    )
+    
+    parser.add_argument(
+        '-d', '--device',
+        default=ALSA_DEVICE,
+        help=f'ALSA capture device (default: {ALSA_DEVICE})'
+    )
+    
+    parser.add_argument(
+        '-r', '--sample-rate',
+        type=int,
+        default=SAMPLE_RATE,
+        help=f'Audio sample rate in Hz (default: {SAMPLE_RATE})'
+    )
+    
+    return parser.parse_args()
+
 async def main():
     """Main function to run the audio monitor and output client."""
-    # Check command line arguments
-    if len(sys.argv) < 2:
-        print("Usage: python3 mled.py <websocket_uri_or_serial_port>")
-        print("Examples:")
-        print("  python3 mled.py ws://192.168.3.6:8888")
-        print("  python3 mled.py /dev/ttyUSB0")
-        print("  python3 mled.py /dev/ttyACM0")
-        sys.exit(1)
+    args = parse_arguments()
     
-    output_target = sys.argv[1]
+    # Initialize ALSA audio monitor with parsed arguments
+    audio_monitor = ALSAAudioMonitor(
+        device=args.device,
+        sample_rate=args.sample_rate,
+        adaptive_boost=args.adaptive_boost
+    )
     
-    # Initialize ALSA audio monitor
-    audio_monitor = ALSAAudioMonitor()
+    print(f"Audio device: {args.device}")
+    print(f"Sample rate: {args.sample_rate} Hz")
+    print(f"Adaptive boost: {'enabled' if args.adaptive_boost else 'disabled'}")
+    if not args.adaptive_boost:
+        print(f"Fixed boost factors: bass={DEFAULT_BASS_BOOST}, mid={DEFAULT_MID_BOOST}, treble={DEFAULT_TREBLE_BOOST}")
+    print()
     
     try:
         print("Starting audio monitoring...")
         audio_monitor.start_monitoring()
         
         # Detect if target is WebSocket URL or serial port
-        if output_target.startswith("ws://") or output_target.startswith("wss://"):
-            print(f"WebSocket mode: connecting to {output_target}")
-            ws_client = WebSocketClient(output_target, "code")
+        if args.output.startswith("ws://") or args.output.startswith("wss://"):
+            print(f"WebSocket mode: connecting to {args.output}")
+            ws_client = WebSocketClient(args.output, "code")
             await ws_client.connect_and_send(audio_monitor)
         else:
-            print(f"Serial port mode: using {output_target}")
-            serial_client = SerialPortClient(output_target)
+            print(f"Serial port mode: using {args.output}")
+            serial_client = SerialPortClient(args.output)
             # Serial client runs synchronously, so we need to run it in a thread
             import threading
             
