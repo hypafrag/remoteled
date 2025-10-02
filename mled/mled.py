@@ -49,7 +49,7 @@ from typing import Optional, Tuple
 
 # Configuration constants
 AUDIO_UPDATE_INTERVAL_MS = 30  # Audio analysis interval in milliseconds
-MAX_COLOR_INTENSITY = 0xAA  # Maximum LED color intensity (170 in decimal)
+MAX_COLOR_INTENSITY = 0xEE  # Maximum LED color intensity
 
 # ALSA configuration
 ALSA_DEVICE = "hw:1,1"  # ALSA loopback capture device (hw:1,1 for loopback)
@@ -60,7 +60,7 @@ CHUNK_SIZE = 1024
 
 # Frequency band definitions for bass, mid, treble (in Hz)
 BASS_FREQ_RANGE = (10, 100)    # Bass frequencies
-MID_FREQ_RANGE = (250, 2000)   # Mid frequencies  
+MID_FREQ_RANGE = (100, 2000)   # Mid frequencies  
 TREBLE_FREQ_RANGE = (2000, 20000)  # Treble frequencies
 
 # Default boost factors (used when adaptive boost is disabled)
@@ -170,8 +170,9 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
             return 0
         # Quadratic decay: intensity = max * (1 - (distance/max_distance)^2)
         decay_factor = 1.0 - (distance_from_center / max_distance) ** 2
-        # Apply RMS scaling to color intensity as well (quiet = dimmer, loud = brighter)
-        return int(MAX_COLOR_INTENSITY * decay_factor * rms_scale)
+        # Apply RMS scaling to color intensity with power of 6 for more dramatic effect
+        intensity_scale = rms_scale ** 6
+        return int(MAX_COLOR_INTENSITY * decay_factor * intensity_scale)
     
     # Light up LEDs from center outward for each frequency band with quadratic decay
     for i in range(1, max(bass_reach, mid_reach, treble_reach) + 1):
@@ -195,10 +196,11 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
             if enable_treble and i <= treble_reach:
                 leds[idx + 2] = calculate_intensity(i, treble_reach)  # B (treble)
     
-    # Handle center LED - full intensity for any active frequency, scaled by RMS
+    # Handle center LED - full intensity for any active frequency, scaled by RMS with power of 6
     if bass_reach > 0 or mid_reach > 0 or treble_reach > 0:
         idx = center * 3
-        center_intensity = int(MAX_COLOR_INTENSITY * rms_scale)
+        intensity_scale = rms_scale ** 6
+        center_intensity = int(MAX_COLOR_INTENSITY * intensity_scale)
         if enable_bass and bass_reach > 0:
             leds[idx] = center_intensity      # R (bass)
         if enable_mid and mid_reach > 0:
