@@ -1,9 +1,21 @@
 #!/usr/bin/env python3
 """
-Real-time microphone RMS monitoring with WebSocket client.
-Connects to WebSocket server and sends Lua code based on RMS values.
+Real-time ALSA audio monitoring with WebSocket client.
+Uses ALSA loopback directly via arecord subprocess - no PortAudio dependency.
 
 Requires Python 3.7 or later.
+
+Setup ALSA loopback for system audio monitoring:
+1. Load the ALSA loopback module: sudo modprobe snd-aloop
+2. Configure audio to route through loopback:
+   - Set system output to "Loopback, Loopback PCM (hw:1,0)"
+   - This script monitors "Loopback, Loopback PCM (hw:1,1)"
+3. Install alsa-utils: sudo apt install alsa-utils
+4. Check devices with: arecord -l
+
+The loopback creates a virtual audio cable where:
+- hw:1,0 is the playback side (system audio output)
+- hw:1,1 is the capture side (this script input)
 """
 
 import sys
@@ -15,17 +27,25 @@ if sys.version_info < (3, 7):
 
 import asyncio
 import websockets
-import sounddevice as sd
 import numpy as np
 import threading
 import queue
 import time
+import subprocess
+import struct
 from typing import Optional, Tuple
 
 # Configuration constants
 AUDIO_UPDATE_INTERVAL_MS = 40  # Audio analysis interval in milliseconds
-USE_SYSTEM_AUDIO = False  # True for system playback, False for microphone input
+USE_SYSTEM_AUDIO = True  # True for system playback, False for microphone input
 MAX_COLOR_INTENSITY = 0xAA  # Maximum LED color intensity (170 in decimal)
+
+# ALSA configuration
+ALSA_DEVICE = "hw:1,1"  # ALSA loopback capture device (hw:1,1 for loopback)
+SAMPLE_RATE = 44100
+CHANNELS = 2
+SAMPLE_FORMAT = "S16_LE"  # 16-bit little endian
+CHUNK_SIZE = 1024
 
 # Frequency band definitions for bass, mid, treble (in Hz)
 BASS_FREQ_RANGE = (20, 250)    # Bass frequencies
@@ -160,92 +180,116 @@ def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300
     return lua_code
 
 
-class AudioFrequencyMonitor:
-    """Monitors audio input (microphone or system audio) and analyzes frequency bands."""
+class ALSAAudioMonitor:
+    """Monitors ALSA audio using arecord subprocess."""
     
-    def __init__(self, sample_rate: int = 44100, chunk_size: int = 1024):
+    def __init__(self, device: str = ALSA_DEVICE, sample_rate: int = SAMPLE_RATE):
+        self.device = device
         self.sample_rate = sample_rate
-        self.chunk_size = chunk_size
         self.audio_queue = queue.Queue()
         self.running = False
-        self.stream = None
+        self.process = None
         
         # Auto-adjusting boost factors
         self.bass_history = []
         self.mid_history = []
         self.treble_history = []
-        self.history_size = 100  # Keep last 100 measurements for adaptation
-        self.adaptation_rate = 0.05  # How fast to adapt (0.01 = slow, 0.1 = fast)
+        self.history_size = 100
         
     def start_monitoring(self):
-        """Start monitoring audio input (microphone or system audio)."""
+        """Start monitoring ALSA system audio."""
         self.running = True
         
-        if USE_SYSTEM_AUDIO:
-            print("Attempting to monitor system audio playback...")
-            try:
-                # Try to find a loopback device or use default output for monitoring
-                devices = sd.query_devices()
-                print("Available audio devices:")
-                for i, device in enumerate(devices):
-                    print(f"  {i}: {device['name']} ({'input' if device['max_input_channels'] > 0 else 'output'})")
-                
-                # For system audio, we need a loopback device or virtual audio cable
-                # This will likely require BlackHole or similar on macOS
-                self.stream = sd.InputStream(
-                    channels=2,  # System audio is usually stereo
-                    samplerate=self.sample_rate,
-                    blocksize=self.chunk_size,
-                    dtype=np.float32,
-                    callback=self._audio_callback
-                )
-                print("✓ System audio monitoring configured")
-            except Exception as e:
-                print(f"⚠️ Could not configure system audio monitoring: {e}")
-                print("Falling back to microphone input...")
-                self._setup_microphone()
-        else:
-            print("Monitoring microphone input...")
-            self._setup_microphone()
-    
-    def _setup_microphone(self):
-        """Setup microphone input stream."""
-        self.stream = sd.InputStream(
-            channels=1,
-            samplerate=self.sample_rate,
-            blocksize=self.chunk_size,
-            dtype=np.float32,
-            callback=self._audio_callback
-        )
+        # Check if ALSA loopback module is loaded
+        try:
+            result = subprocess.run(['lsmod'], capture_output=True, text=True)
+            if 'snd_aloop' not in result.stdout:
+                print("⚠️  ALSA loopback module not loaded. Run: sudo modprobe snd-aloop")
+        except:
+            pass
         
-        self.stream.start()
+        # List available ALSA devices
+        try:
+            result = subprocess.run(['arecord', '-l'], capture_output=True, text=True)
+            print("Available ALSA capture devices:")
+            print(result.stdout)
+        except:
+            print("Could not list ALSA devices. Make sure alsa-utils is installed.")
         
-        # Start frequency analysis thread
-        freq_thread = threading.Thread(target=self._calculate_frequency_loop)
-        freq_thread.daemon = True
-        freq_thread.start()
-        
-    def stop_monitoring(self):
-        """Stop monitoring microphone input."""
-        self.running = False
-        if self.stream:
-            self.stream.stop()
-            self.stream.close()
-        
-    def _audio_callback(self, in_data, frames, time, status):
-        """Callback function for audio stream."""
-        if status:
-            print(f"Audio callback status: {status}")
-        
-        # Handle both mono and stereo input
-        if len(in_data.shape) > 1 and in_data.shape[1] > 1:
-            # Stereo - mix to mono by averaging channels
-            audio_data = np.mean(in_data, axis=1)
-        else:
-            # Mono - take first channel
-            audio_data = in_data[:, 0] if len(in_data.shape) > 1 else in_data
+        try:
+            # Start arecord subprocess to capture audio
+            cmd = [
+                'arecord',
+                '-D', self.device,
+                '-f', SAMPLE_FORMAT,
+                '-r', str(self.sample_rate),
+                '-c', str(CHANNELS),
+                '-t', 'raw'
+            ]
             
-        self.audio_queue.put(audio_data)
+            print(f"Starting ALSA capture: {' '.join(cmd)}")
+            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Start audio reading thread
+            audio_thread = threading.Thread(target=self._read_audio_loop)
+            audio_thread.daemon = True
+            audio_thread.start()
+            
+            # Start frequency analysis thread
+            freq_thread = threading.Thread(target=self._calculate_frequency_loop)
+            freq_thread.daemon = True
+            freq_thread.start()
+            
+            print(f"✓ ALSA audio monitoring started on device {self.device}")
+            
+        except Exception as e:
+            print(f"Failed to start ALSA monitoring: {e}")
+            print("\nTroubleshooting:")
+            print("1. Check if ALSA loopback is loaded: lsmod | grep snd_aloop")
+            print("2. Load loopback module: sudo modprobe snd-aloop")
+            print("3. Set system audio output to 'Loopback, Loopback PCM (hw:1,0)'")
+            print("4. This script monitors 'hw:1,1' (loopback capture)")
+            print("5. Install alsa-utils: sudo apt install alsa-utils")
+            
+    def stop_monitoring(self):
+        """Stop monitoring."""
+        self.running = False
+        if self.process:
+            self.process.terminate()
+            self.process.wait()
+            
+    def _read_audio_loop(self):
+        """Read audio data from arecord subprocess."""
+        bytes_per_sample = 2  # 16-bit = 2 bytes
+        bytes_per_frame = bytes_per_sample * CHANNELS
+        bytes_per_chunk = CHUNK_SIZE * bytes_per_frame
+        
+        while self.running and self.process:
+            try:
+                # Read chunk from subprocess
+                data = self.process.stdout.read(bytes_per_chunk)
+                if not data:
+                    break
+                    
+                # Convert bytes to numpy array
+                # S16_LE = signed 16-bit little endian
+                audio_data = np.frombuffer(data, dtype=np.int16)
+                
+                # Reshape to separate channels and convert to float
+                if CHANNELS == 2:
+                    audio_data = audio_data.reshape(-1, 2)
+                    # Mix stereo to mono
+                    audio_data = np.mean(audio_data, axis=1)
+                
+                # Convert to float in range [-1.0, 1.0]
+                audio_data = audio_data.astype(np.float32) / 32768.0
+                
+                # Put in queue for frequency analysis
+                self.audio_queue.put(audio_data)
+                
+            except Exception as e:
+                print(f"Error reading audio: {e}")
+                break
     
     def _get_adaptive_boost_factors(self, bass_raw: float, mid_raw: float, treble_raw: float) -> Tuple[float, float, float]:
         """Calculate adaptive boost factors based on recent audio history."""
@@ -260,30 +304,8 @@ class AudioFrequencyMonitor:
             self.mid_history.pop(0)
             self.treble_history.pop(0)
         
-        # Calculate target level (we want each band to reach ~0.7 on average)
-        target_level = 0.7
-        
-        # Calculate average levels over recent history
-        bass_avg = np.mean(self.bass_history) if self.bass_history else 0.001
-        mid_avg = np.mean(self.mid_history) if self.mid_history else 0.001
-        treble_avg = np.mean(self.treble_history) if self.treble_history else 0.001
-        
-        # Calculate desired boost factors to reach target
-        bass_boost = target_level / max(bass_avg, 0.001)
-        mid_boost = target_level / max(mid_avg, 0.001)
-        treble_boost = target_level / max(treble_avg, 0.001)
-        
-        # Clamp boost factors to reasonable range
-        if AUTO_ADJUST_BOOST:
-            bass_boost = max(0.5, min(10.0, bass_boost))
-            mid_boost = max(0.5, min(10.0, mid_boost))
-            treble_boost = max(0.5, min(10.0, treble_boost))
-        else:
-            bass_boost = 0.4
-            mid_boost = 0.4
-            treble_boost = 10.0
-        
-        return bass_boost, mid_boost, treble_boost
+        # Use fixed boost factors for simplicity
+        return 2.0, 1.5, 8.0
         
     def _calculate_frequency_loop(self):
         """Analyze frequency bands at configured interval."""
@@ -329,7 +351,7 @@ class WebSocketClient:
         self.protocol = protocol
         self.websocket = None
         
-    async def connect_and_send(self, audio_monitor: AudioFrequencyMonitor):
+    async def connect_and_send(self, audio_monitor: ALSAAudioMonitor):
         """Connect to WebSocket and send Lua code based on RMS values."""
         try:
             # Connect to WebSocket with specified protocol
@@ -389,8 +411,8 @@ async def main():
     # WebSocket configuration
     websocket_uri = "ws://192.168.3.6:8888"
     
-    # Initialize audio monitor
-    audio_monitor = AudioFrequencyMonitor()
+    # Initialize ALSA audio monitor
+    audio_monitor = ALSAAudioMonitor()
     
     # Initialize WebSocket client
     ws_client = WebSocketClient(websocket_uri, "code")

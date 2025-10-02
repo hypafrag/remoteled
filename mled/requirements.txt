@@ -1,6 +1,7 @@
 # WebSocket client library (Python 3.7 compatible)
 websockets>=8.0,<11.0
 
-# Real-time audio processing (Python 3.7 compatible)
-sounddevice>=0.4.0,<0.5.0
+# Audio processing with NumPy (Python 3.7 compatible)
 numpy>=1.16.0,<1.22.0
+
+# No sounddevice dependency - using ALSA directly via arecord subprocess
