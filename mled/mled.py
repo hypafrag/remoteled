@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """
-Real-time ALSA audio monitoring with WebSocket or Serial Port output.
 Uses ALSA loopback directly via arecord subprocess - no PortAudio dependency.
 
 Requires Python 3.7 or later.
@@ -42,17 +41,14 @@ import websockets
 import numpy as np
 import threading
 import queue
-import time
 import subprocess
-import struct
 import os
 import sys
 import argparse
 from typing import Optional, Tuple
 
 # Configuration constants
-AUDIO_UPDATE_INTERVAL_MS = 40  # Audio analysis interval in milliseconds
-USE_SYSTEM_AUDIO = True  # True for system playback, False for microphone input
+AUDIO_UPDATE_INTERVAL_MS = 30  # Audio analysis interval in milliseconds
 MAX_COLOR_INTENSITY = 0xAA  # Maximum LED color intensity (170 in decimal)
 
 # ALSA configuration
@@ -116,7 +112,8 @@ def analyze_frequency_bands(audio_data: np.ndarray, sample_rate: int, boost_fact
     return bass_level, mid_level, treble_level
 
 
-def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300) -> bytes:
+def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300, 
+                     enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True) -> bytes:
     """
     Generate LED data as raw bytes for serial port or Lua code for WebSocket.
     Each frequency range creates its own colored line with quadratic decay from center.
@@ -140,9 +137,10 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
     max_reach = center  # Maximum LEDs we can light from center to edge
     
     # Calculate how many LEDs to light up from center for each frequency
-    bass_reach = int(bass * max_reach)
-    mid_reach = int(mid * max_reach)
-    treble_reach = int(treble * max_reach)
+    # Only calculate reach for enabled frequency bands
+    bass_reach = int(bass * max_reach) if enable_bass else 0
+    mid_reach = int(mid * max_reach) if enable_mid else 0
+    treble_reach = int(treble * max_reach) if enable_treble else 0
     
     # Create RGB byte array (3 bytes per LED: R, G, B)
     leds = []
@@ -164,42 +162,43 @@ def generate_led_data(bass: float, mid: float, treble: float, pix_num: int = 300
         # Light up to the right of center
         if center + i < pix_num:
             idx = (center + i) * 3
-            if i <= bass_reach:
+            if enable_bass and i <= bass_reach:
                 leds[idx] = calculate_intensity(i, bass_reach)      # R (bass)
-            if i <= mid_reach:
+            if enable_mid and i <= mid_reach:
                 leds[idx + 1] = calculate_intensity(i, mid_reach)  # G (mid)
-            if i <= treble_reach:
+            if enable_treble and i <= treble_reach:
                 leds[idx + 2] = calculate_intensity(i, treble_reach)  # B (treble)
                 
         # Light up to the left of center
         if center - i >= 0:
             idx = (center - i) * 3
-            if i <= bass_reach:
+            if enable_bass and i <= bass_reach:
                 leds[idx] = calculate_intensity(i, bass_reach)      # R (bass)
-            if i <= mid_reach:
+            if enable_mid and i <= mid_reach:
                 leds[idx + 1] = calculate_intensity(i, mid_reach)  # G (mid)
-            if i <= treble_reach:
+            if enable_treble and i <= treble_reach:
                 leds[idx + 2] = calculate_intensity(i, treble_reach)  # B (treble)
     
     # Handle center LED - full intensity for any active frequency
     if bass_reach > 0 or mid_reach > 0 or treble_reach > 0:
         idx = center * 3
-        if bass_reach > 0:
+        if enable_bass and bass_reach > 0:
             leds[idx] = MAX_COLOR_INTENSITY      # R (bass)
-        if mid_reach > 0:
+        if enable_mid and mid_reach > 0:
             leds[idx + 1] = MAX_COLOR_INTENSITY  # G (mid)
-        if treble_reach > 0:
+        if enable_treble and treble_reach > 0:
             leds[idx + 2] = MAX_COLOR_INTENSITY  # B (treble)
     
     # Return as raw bytes for serial port
     return bytes(leds)
 
-def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300) -> str:
+def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300,
+                     enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True) -> str:
     """
     Generate Lua code for WebSocket mode.
     Wrapper around generate_led_data that formats as Lua code.
     """
-    led_data = generate_led_data(bass, mid, treble, pix_num)
+    led_data = generate_led_data(bass, mid, treble, pix_num, enable_bass, enable_mid, enable_treble)
     led_values = ",".join(map(str, led_data))
     return f"return {{{led_values}}}"
 
@@ -207,10 +206,16 @@ def generate_lua_code(bass: float, mid: float, treble: float, pix_num: int = 300
 class ALSAAudioMonitor:
     """Monitors ALSA audio using arecord subprocess."""
     
-    def __init__(self, device: str = ALSA_DEVICE, sample_rate: int = SAMPLE_RATE, adaptive_boost: bool = False):
+    def __init__(self, device: str = ALSA_DEVICE, sample_rate: int = SAMPLE_RATE, adaptive_boost: bool = False,
+                 enable_bass: bool = True, enable_mid: bool = True, enable_treble: bool = True, 
+                 update_interval_ms: int = AUDIO_UPDATE_INTERVAL_MS):
         self.device = device
         self.sample_rate = sample_rate
         self.adaptive_boost = adaptive_boost
+        self.enable_bass = enable_bass
+        self.enable_mid = enable_mid
+        self.enable_treble = enable_treble
+        self.update_interval_ms = update_interval_ms
         self.audio_queue = queue.Queue()
         self.running = False
         self.process = None
@@ -357,7 +362,7 @@ class ALSAAudioMonitor:
     def _calculate_frequency_loop(self):
         """Analyze frequency bands at configured interval."""
         buffer = []
-        samples_per_interval = int(self.sample_rate * (AUDIO_UPDATE_INTERVAL_MS / 1000.0))
+        samples_per_interval = int(self.sample_rate * (self.update_interval_ms / 1000.0))
         
         while self.running:
             try:
@@ -445,7 +450,10 @@ class SerialPortClient:
                     bass, mid, treble = audio_monitor.websocket_queue.get(timeout=0.1)
                     
                     # Generate raw LED data
-                    led_data = generate_led_data(bass, mid, treble)
+                    led_data = generate_led_data(bass, mid, treble, 300, 
+                                               audio_monitor.enable_bass, 
+                                               audio_monitor.enable_mid, 
+                                               audio_monitor.enable_treble)
                     
                     # Send raw bytes to serial port (900 bytes total)
                     if len(led_data) == 900:  # 300 LEDs * 3 bytes each
@@ -497,7 +505,10 @@ class WebSocketClient:
                         bass, mid, treble = audio_monitor.websocket_queue.get(timeout=0.1)
                         
                         # Generate Lua code based on frequency analysis
-                        lua_code = generate_lua_code(bass, mid, treble)
+                        lua_code = generate_lua_code(bass, mid, treble, 300,
+                                                    audio_monitor.enable_bass,
+                                                    audio_monitor.enable_mid,
+                                                    audio_monitor.enable_treble)
                         
                         # Send Lua code if it's not empty
                         if lua_code.strip():
@@ -539,10 +550,15 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s ws://192.168.3.6:8888           # WebSocket mode (sends Lua code)
-  %(prog)s /dev/ttyUSB0                     # Serial port mode (sends raw RGB data)
-  %(prog)s /dev/ttyACM0 --adaptive-boost   # Serial mode with adaptive boost
-  %(prog)s ws://example.com:8888 -a        # WebSocket mode with adaptive boost
+  %(prog)s ws://192.168.3.6:8888              # WebSocket mode (all frequencies)
+  %(prog)s /dev/ttyUSB0                        # Serial port mode (all frequencies)
+  %(prog)s /dev/ttyACM0 --adaptive-boost      # Serial mode with adaptive boost
+  %(prog)s ws://example.com:8888 -a           # WebSocket mode with adaptive boost
+  %(prog)s /dev/ttyUSB0 --disable-mid         # Only bass (red) and treble (blue)
+  %(prog)s /dev/ttyUSB0 --disable-bass --disable-treble  # Only mid frequencies (green)
+  %(prog)s ws://192.168.3.6:8888 --disable-treble        # Only bass (red) and mid (green)
+  %(prog)s /dev/ttyUSB0 -i 50                 # 50ms update interval (slower)
+  %(prog)s ws://192.168.3.6:8888 --interval 20          # 20ms update interval (faster)
 
 ALSA Setup:
   1. Load loopback module: sudo modprobe snd-aloop
@@ -579,24 +595,97 @@ Output formats:
         help=f'Audio sample rate in Hz (default: {SAMPLE_RATE})'
     )
     
+    parser.add_argument(
+        '-i', '--interval',
+        type=int,
+        default=AUDIO_UPDATE_INTERVAL_MS,
+        help=f'Audio analysis update interval in milliseconds (default: {AUDIO_UPDATE_INTERVAL_MS})'
+    )
+    
+    # Frequency band selection options
+    parser.add_argument(
+        '--enable-bass',
+        action='store_true',
+        default=True,
+        help='Enable bass frequencies (red color, 20-250 Hz) - default: enabled'
+    )
+    
+    parser.add_argument(
+        '--disable-bass',
+        action='store_true',
+        help='Disable bass frequencies (red color)'
+    )
+    
+    parser.add_argument(
+        '--enable-mid',
+        action='store_true', 
+        default=True,
+        help='Enable mid frequencies (green color, 250-3000 Hz) - default: enabled'
+    )
+    
+    parser.add_argument(
+        '--disable-mid',
+        action='store_true',
+        help='Disable mid frequencies (green color)'
+    )
+    
+    parser.add_argument(
+        '--enable-treble',
+        action='store_true',
+        default=True,
+        help='Enable treble frequencies (blue color, 3000-20000 Hz) - default: enabled'
+    )
+    
+    parser.add_argument(
+        '--disable-treble',
+        action='store_true',
+        help='Disable treble frequencies (blue color)'
+    )
+    
     return parser.parse_args()
 
 async def main():
     """Main function to run the audio monitor and output client."""
     args = parse_arguments()
     
+    # Handle frequency band enable/disable logic
+    enable_bass = not args.disable_bass if args.disable_bass else args.enable_bass
+    enable_mid = not args.disable_mid if args.disable_mid else args.enable_mid  
+    enable_treble = not args.disable_treble if args.disable_treble else args.enable_treble
+    
+    # Check if at least one frequency band is enabled
+    if not (enable_bass or enable_mid or enable_treble):
+        print("❌ Error: At least one frequency band must be enabled!")
+        print("Use --enable-bass, --enable-mid, or --enable-treble")
+        sys.exit(1)
+    
     # Initialize ALSA audio monitor with parsed arguments
     audio_monitor = ALSAAudioMonitor(
         device=args.device,
         sample_rate=args.sample_rate,
-        adaptive_boost=args.adaptive_boost
+        adaptive_boost=args.adaptive_boost,
+        enable_bass=enable_bass,
+        enable_mid=enable_mid,
+        enable_treble=enable_treble,
+        update_interval_ms=args.interval
     )
     
     print(f"Audio device: {args.device}")
     print(f"Sample rate: {args.sample_rate} Hz")
+    print(f"Update interval: {args.interval} ms")
     print(f"Adaptive boost: {'enabled' if args.adaptive_boost else 'disabled'}")
     if not args.adaptive_boost:
         print(f"Fixed boost factors: bass={DEFAULT_BASS_BOOST}, mid={DEFAULT_MID_BOOST}, treble={DEFAULT_TREBLE_BOOST}")
+    
+    # Display enabled frequency bands
+    bands = []
+    if enable_bass:
+        bands.append("bass (red, 20-250 Hz)")
+    if enable_mid:
+        bands.append("mid (green, 250-3000 Hz)")
+    if enable_treble:
+        bands.append("treble (blue, 3000-20000 Hz)")
+    print(f"Enabled frequency bands: {', '.join(bands)}")
     print()
     
     try:
