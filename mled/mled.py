@@ -2,7 +2,16 @@
 """
 Real-time microphone RMS monitoring with WebSocket client.
 Connects to WebSocket server and sends Lua code based on RMS values.
+
+Requires Python 3.7 or later.
 """
+
+import sys
+
+# Check Python version compatibility
+if sys.version_info < (3, 7):
+    print("This script requires Python 3.7 or later.")
+    sys.exit(1)
 
 import asyncio
 import websockets
@@ -402,4 +411,14 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Python 3.7 compatible asyncio event loop
+    try:
+        # Try using asyncio.run() if available (Python 3.7+)
+        asyncio.run(main())
+    except AttributeError:
+        # Fallback for older Python versions
+        loop = asyncio.get_event_loop()
+        try:
+            loop.run_until_complete(main())
+        finally:
+            loop.close()
